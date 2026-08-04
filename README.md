@@ -1,7 +1,7 @@
 ## Code and data associated with:
 
 # More rapid influenza virus elimination on baloxavir versus oseltamivir can be explained by drug mechanism
-Preprint at: https://doi.org/10.21203/rs.3.rs-10282651/v1
+Preprint: https://doi.org/10.21203/rs.3.rs-10282651/v1
 
 Authors: Tower, A (1), Schwartz, E., (1), Duke, E.,(2), Schiffer, J. (3), Esmaeili, S. (3), Owens, K. (3)
 
