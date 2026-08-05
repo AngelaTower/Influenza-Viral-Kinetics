@@ -1,0 +1,98 @@
+<DATAFILE>
+
+[FILEINFO]
+file={path='../../../../../Data_IAV Model/FLU_ALL_two_censored.csv'}
+delimiter = comma
+header={ID, Time, Viral_Titer, censored, cat_strain, cat_control}
+
+[CONTENT]
+ID = {use=identifier}
+Time = {use=time}
+Viral_Titer = {use=observation, type=continuous}
+censored = {use=censored}
+cat_strain = {use=covariate, type=categorical}
+cat_control = {use=covariate, type=categorical}
+
+[FILTER]
+FLU_ALL_two_censored_filtered = {origin='../../../../../Data_IAV Model/FLU_ALL_two_censored.csv', filter={{removeLines={'ID==58A', 'ID==57B-A', 'ID==33B-A', 'ID==62B-A', 'ID==3B-B', 'ID==201B-B', 'ID==212B-B', 'ID==47B-B'}}}}
+
+[APPLICATION]
+computation=FLU_ALL_two_censored_filtered
+
+<MODEL>
+
+[COVARIATE]
+input = {cat_control, cat_strain}
+
+cat_control = {type=categorical, categories={'0', '1'}}
+cat_strain = {type=categorical, categories={'0', '1'}}
+
+[INDIVIDUAL]
+input = {c_pop, delta_pop, omega_delta, log10beta_pop, E0_pop, omega_E0, k_pop, r_pop, log10p_pop, omega_log10p, theta_pop, omega_theta, gamma_pop, log10eta_pop, omega_log10eta, log10phi_pop, omega_log10phi, omega_r, omega_gamma, h_pop}
+
+DEFINITION:
+c = {distribution=logitNormal, max=18, typical=c_pop, no-variability}
+delta = {distribution=logitNormal, min=1, max=10, typical=delta_pop, sd=omega_delta}
+log10beta = {distribution=normal, typical=log10beta_pop, no-variability}
+E0 = {distribution=logitNormal, min=1, max=10000, typical=E0_pop, sd=omega_E0}
+k = {distribution=logitNormal, max=10, typical=k_pop, no-variability}
+r = {distribution=logitNormal, min=1, max=92564, typical=r_pop, sd=omega_r}
+log10p = {distribution=logitNormal, min=-2.05162, max=3, typical=log10p_pop, sd=omega_log10p}
+theta = {distribution=logNormal, typical=theta_pop, sd=omega_theta}
+gamma = {distribution=logitNormal, min=1, max=6.5, typical=gamma_pop, sd=omega_gamma}
+log10eta = {distribution=normal, typical=log10eta_pop, sd=omega_log10eta}
+log10phi = {distribution=normal, typical=log10phi_pop, sd=omega_log10phi}
+h = {distribution=logNormal, typical=h_pop, no-variability}
+
+[LONGITUDINAL]
+input = {a}
+
+file = '../../../Models/model4a_shifted_Hill.txt'
+
+DEFINITION:
+Viral_Titer = {distribution=normal, prediction=log10V, errorModel=constant(a)}
+
+<FIT>
+data = 'Viral_Titer'
+model = Viral_Titer
+
+<PARAMETER>
+E0_pop = {value=98.607512, method=MLE}
+a = {value=1, method=MLE}
+c_pop = {value=15, method=FIXED}
+delta_pop = {value=3.5139527, method=MLE}
+gamma_pop = {value=4.6297823, method=MLE}
+h_pop = {value=8, method=FIXED}
+k_pop = {value=0.01, method=FIXED}
+log10beta_pop = {value=-6.3077664, method=FIXED}
+log10eta_pop = {value=-1.0134599, method=MLE}
+log10p_pop = {value=1.929444, method=MLE}
+log10phi_pop = {value=-5.2145068, method=MLE}
+omega_E0 = {value=1, method=MLE}
+omega_delta = {value=0.5288, method=MLE}
+omega_gamma = {value=1, method=MLE}
+omega_log10eta = {value=1, method=MLE}
+omega_log10p = {value=1, method=MLE}
+omega_log10phi = {value=1, method=MLE}
+omega_r = {value=1, method=MLE}
+omega_theta = {value=1, method=MLE}
+r_pop = {value=451.71759, method=MLE}
+theta_pop = {value=2.2463795, method=MLE}
+
+<MONOLIX>
+
+[TASKS]
+populationParameters()
+individualParameters(method = {conditionalMean, conditionalMode })
+fim(method = StochasticApproximation)
+logLikelihood(method = ImportanceSampling)
+
+[PLOTS]
+run = true
+plots = {indfits = {selected = true}, parameterdistribution = {selected = true}, obspred = {selected = true}, covariancemodeldiagnosis = {selected = true}, covariatemodeldiagnosis = {selected = true}, vpc = {selected = true}, residualsscatter = {selected = true}, residualsdistribution = {selected = true}, randomeffects = {selected = true}, saemresults = {selected = true}}
+
+[SETTINGS]
+GLOBAL:
+seed = 1452505197
+exportpath = 'M4a_shifted_Hill8_fixed_c(Owens)_beta'
+
