@@ -1,0 +1,662 @@
+---
+title: "Flu_Manuscript_SuppFigures_1_2"
+author: "Angela Tower"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# Modified code for n = 44 volunteers' viral load plots
+```{r Clear Environment}
+## Start with a clear workspace
+rm(list = ls())
+```
+
+```{r Load Libraries}
+## Load libraries
+library(deSolve)
+library(ggplot2)
+library(minpack.lm)
+library(Rsmlx)
+library(dplyr)
+library(scales)
+library(gridExtra)
+library(cowplot)
+library(ggpubr)
+library(grid)
+library(tidyr)
+```
+
+```{r Color Schemes for cohorts}
+group_colors <- c("Low-shedder" = "#E74C3C", "High-shedder" = "#3498DB")
+limit_of_detection <- 1e-10  # Adjust based on LODs
+```
+
+```{r Load and plot human challenge data individually}
+# Set wd to "/Users/angela/Library/CloudStorage/OneDrive-WashingtonStateUniversity(email.wsu.edu)/Flu Research/Data_R"
+
+# Mac directory
+base_directory <- "~/OneDrive - Fred Hutch Cancer Center/IAV Data/Monolix/Truncated Fittings/Projects"
+
+flu_data <- read.csv(file.path(base_directory, "flu_all_truncated.csv"),
+                     header = TRUE,
+                     stringsAsFactors = FALSE,
+                     sep = ",")
+
+IDs <- unique(flu_data[,"ID"])
+head(flu_data)
+
+library(grid)
+raw_plots <- list()         
+plot_counter <- 0 
+
+# loop through the volunteers to generate individual plots
+for(ID in unique(flu_data$ID)){
+  
+  # subset the data for current volunteer
+  volunteer_data <- flu_data[flu_data$ID == ID,]
+  
+  # create the plot for each volunteer's observed data
+  observed_plot <- ggplot(volunteer_data,
+                     aes(x = time, y = viral_titer))+
+              geom_point(color = "black")+
+              labs( #axes labels
+                x = "Days Post Infection",
+                y = "log10(TCID50/ml)",
+                title = paste(ID)
+              ) +
+              theme_minimal()+ 
+              #x-axis label (days post infection)
+              scale_x_continuous(limits = c(0, 10),breaks = seq(0, 10, by = 2))+
+              #y-axis label (viral load log10)
+              scale_y_continuous(limits = c(-0.5, 8),
+                                 breaks = seq(0, 10, by = 1)
+            )
+  print(observed_plot)
+}
+```
+
+```{r Faceted plots of HC data} 
+# Creating a faceted plot of all volunteers' observed data
+# Overlay the population average between low and high shedders
+  
+# create a new column to label low vs high shedders
+flu_data <- flu_data %>%
+  mutate(group_label = ifelse(cat_control == 1, "Low Shedder", "High Shedder"))
+  
+# Peak per individual: low vs high 
+individual_peaks <- flu_data %>%
+  group_by(ID, group_label) %>%
+  summarize(
+    peak_titer = max(viral_titer, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+# Average of peaks
+peak_average <- individual_peaks %>%
+  group_by(group_label) %>%
+  summarize(
+    avg_peak_titer = mean(peak_titer, na.rm = TRUE),
+    median_peak_titer = median(peak_titer, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+# Average per group: low vs high 
+pop_average <- flu_data %>%
+  group_by(group_label, time) %>%
+  summarize(
+    average = mean(viral_titer, na.rm = TRUE),
+    st_dev  = sd(viral_titer, na.rm = TRUE),# averaging the vl between low vs high
+    .groups = 'drop'               # Avoid the grouped output message
+    )
+
+subset_volunteers <- c("")
+
+pop_average %>% filter(group_label == "High")
+
+
+# plotting
+observed_plot <- ggplot(flu_data, 
+                        aes(x = time, 
+                            y = viral_titer))+
+  
+  # plot observed data points according to group color
+  geom_point(aes(color = group_label),
+             alpha = 0.5) + 
+  # plot FAINT line observed vl accordingly to group color
+  geom_line(aes(group = ID,
+                color = group_label),
+            linewidth = 0.75, alpha = 0.8) +
+  
+  # labeling the plot
+  #labs(
+    #  x = "Days Post Infection",       
+    #  y = "Log10(TCID50/ml)",
+       #title = "Untreated Volunteers: Viral Titers"
+   #    )+
+
+  #x-axis label (days post infection)
+  scale_x_continuous(limits = c(0, 10), 
+                     breaks = seq(0, 10, by = 2),
+                     name = expression(paste("Days Post Infection (DPI)"))
+                     )+
+  
+  #y-axis label (viral load log10)
+  scale_y_continuous(
+    name = expression(paste("Viral Titer (log"[10], " TCID"[50], "/mL)"), face = "bold"),
+    breaks = seq(0, 7, by = 2),
+    limits = c(0, 7)
+  )+
+  facet_wrap(~ID, nrow = 5) +
+  scale_color_manual(values = c("High Shedder" = "#3498DB", 
+                                "Low Shedder" = "#E74C3C"
+                                ),
+                     name = "Legend") + 
+  # Themes
+  theme_minimal(base_size = 22) +
+  theme(
+    panel.grid.major = element_blank(),        # Remove major grid lines
+    #panel.grid.minor = element_blank(),         # Remove minor grid lines
+    axis.line = element_line(color = "black"),
+    
+    # axis labels 
+    axis.text = element_text(size = 18),
+    axis.title = element_text(size = 22, face = "bold"),
+    
+    legend.position = c(0.95, 0.1),      # bottom right position
+    plot.title = element_text(size = 25, face = "bold", hjust = 0.5)
+  )
+  
+print(observed_plot)
+
+## Current directory: /Users/angela.tower/Library/CloudStorage/OneDrive-WashingtonStateUniversity(email.wsu.edu)/Research/Codes/Influenza Project
+
+## Add into Figures Folder
+#ggsave("/Users/angela.tower/Library/CloudStorage/OneDrive-WashingtonStateUniversity(email.wsu.edu)/Research/Codes/Influenza Project/Figures/observed_volunteers_plot.png", observed_plot, width = 19, height = 12, dpi = 400)
+```
+
+```{r Define time}
+
+# Create interpolated data for every 0.5 days (12 hours)
+time_grid <- seq(0, 8, by = 0.25)  # Every 12 hours from 0 to 8 days
+```
+
+# Trend curves of low and high shedders using LOESS
+```{r Smoothing the AVG using LOESS}
+# Calculate peak median = median at observed time points of high vs. low-shedders' data
+pop_average <- flu_data %>%
+  group_by(group_label, time) %>%    # grouping by high/low and time
+  summarize(average = median(viral_titer, na.rm = TRUE),
+            .groups = "drop")
+
+# statistical data: peak viral load, day of peak, median peak of each individual
+peak_data <- flu_data %>%
+  group_by(ID, group_label) %>%         #grouping by ID and high/low
+  summarize(
+    peak_viral_load = max(viral_titer, na.rm = TRUE),         # peak viral load
+    day_of_peak = time[which.max(viral_titer)],               # time of peak 
+    average_peak = median(peak_viral_load, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+# peak average of each group
+peak_average <- peak_data %>%
+  group_by(group_label) %>%
+  summarize(
+    peak_average = mean(average_peak),
+    peak_median = median(average_peak),
+    .groups = 'drop'
+  )
+
+# ---------- peak average ------ peak median
+# high |       4.55                 4.25
+# low  |       1.82                 2
+print(pop_average)
+
+##################################################################
+## Optimize to find best span value such that the SSE between 
+# regression and mean value at each time point is minimized
+## Define objective function
+##################################################################
+calculate_sse <- function(span, data){
+  # time grid
+  time_grid <- seq(min(data$time),
+                   max(data$time),
+                   by = 0.8)
+  
+  # Fit LOESS with given span
+  loess_fit <- loess(average ~ time, 
+                     data = data, 
+                     span = span)
+  
+  # Predict on original time points (not interpolated grid)
+  predictions <- predict(loess_fit, 
+                         newdata = data)
+  
+  # Calculate SSE between prediction and observed data
+  sse <- sum((data$average - predictions)^2, na.rm = TRUE)
+  
+  return(sse)
+}
+
+##################################################################
+optimal_spans <- list()
+sse_results <- data.frame()
+
+for(group in unique(pop_average$group_label)){
+  
+  #subset data 
+  group_data <- pop_average %>% filter(group_label == group)
+  
+  #optimize span (between 0.1 and 1) using previously defined function
+  optimization <- optimize(
+    f = calculate_sse,          # set the objective function
+    interval = c(0.1, 1.0),     # interval for testing span values
+    data = group_data,          # read in the subsetted data
+    maximum = FALSE             # minimize instead
+  )
+  
+  optimal_spans[[group]] <- optimization$minimum
+  
+  cat(sprintf("\n%s: Optimal span = %.3f, SSE = $.3f\n",     # to three decimal places
+              group, optimization$minimum, 
+              optimization$objective))
+  
+  # store results
+  sse_results <- rbind(sse_results,
+                       data.frame(group = group,
+                                  optimal_span = optimization$minimum,
+                                  min_sse = optimization$objective))
+}
+
+print(sse_results)
+
+###################################################### 
+# Low-shedders' smooth average using LOESS: locally estimated scatterplot smoothing
+###################################################### 
+low_smooth <- pop_average %>%
+  filter(group_label == "Low-shedder") %>%
+  {predict(loess(average ~time, 
+                 data = ., 
+                 span = 0.8
+                 #span = 0.257
+                 ),
+           newdata = data.frame(time = time_grid))} %>%
+  pmax(limit_of_detection) %>%         # take the max or LOD to avoid negatives
+  data.frame(group_label = "Low-shedder",
+             time = time_grid,
+             average = .)
+
+######################################################  
+# High-shedders' smooth average using LOESS
+###################################################### 
+high_smooth <- pop_average %>%
+  filter(group_label == "High-shedder") %>%
+  {predict(loess(average ~ time, 
+                 data = ., 
+                 span = 0.8,
+                 #span = 0.107
+                 ), # span value between 0 and 1 controlling the amount of smoothing
+           newdata = data.frame(time = time_grid))} %>%
+  pmax(limit_of_detection) %>%         # take the max or LOD to avoid negatives
+  data.frame(group_label = "High-shedder",
+             time = time_grid,
+             average = .)
+
+
+###################################################### 
+# Plot with smoothed averages using LOESS
+###################################################### 
+observed_loess_individuals <- ggplot()+
+  
+  # individual observations all in gray
+  geom_line(data = flu_data,
+            aes(x = time, 
+                y = viral_titer, 
+                group = ID),
+            color = "gray70",
+            alpha = 0.3,
+            linewidth = 0.6)+
+  
+  # Low-shedders in red (LOESS)
+  geom_line(data = low_smooth,
+            aes(x = time, y = average, color = group_label),
+            linewidth = 1) +
+  
+  # High-shedders in blue (LOESS)
+  geom_line(data = high_smooth,
+            aes(x = time, y = average, color = group_label), 
+            linewidth = 1)+
+
+  
+  scale_color_manual(values = c("Low-shedder" = "#E74C3C",
+                                "High-shedder" = "#3498DB"),
+                     # Legend labeling the median curves
+                     name = "LOESS Curves") +
+  
+  # Facet by group
+  facet_wrap(~group_label, ncol = 2, scales = "fixed")+
+  
+  # Labeling of plot
+  labs(x = "DPI", 
+       y = "Viral Titer",
+       #title = "Human Challenge Data - Median Viral Load"    #median 
+  ) +
+  
+  # Themes
+  theme_minimal(base_size = 12)+
+  theme(
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black"),
+    legend.position = c(0.9, 0.88),     # top right position
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+  ) +
+  
+  # x-axis labeling
+   scale_x_continuous(limits = c(0, 10), breaks = seq(0, 10, by = 2))+
+  
+  # y-axis labeling
+  scale_y_continuous(
+    name = expression(paste("Viral titer (log"[10], " TCID"[50], "/mL)")),
+    breaks = seq(0, 7, by = 1),
+    limits = c(0, 7)
+  )
+
+print(observed_loess_individuals)
+
+## Add into Figures Folder
+#ggsave("Figures/ind_mean_loess.png", 
+#       observed_loess_individuals, 
+#       width = 16, 
+#       height = 12, 
+#       dpi = 400)
+```
+
+```{r Low-shedder: Median with IQR}
+# calculate summary statistics: median, q1, q3, mean for each cohort
+pop_summary <- flu_data %>%
+  group_by(group_label, time) %>%
+  summarize(
+    median = median(viral_titer, na.rm = TRUE),
+    q1 = quantile(viral_titer, 0.25, na.rm = TRUE),
+    q3 = quantile(viral_titer, 0.75, na.rm = TRUE),
+    mean = mean(viral_titer, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# smooth median and IQR curves for low and high shedders pulling from 
+# pop_summary
+
+###------------ Low Shedders ------------ ###
+# -- pop_summary df has "group_label" as "Low Shedders" and "High Shedder" 
+# -- CASE SENSITIVE!!!
+
+low_data <- pop_summary %>%
+  filter(group_label == "Low Shedder")
+
+low_shedders_smooth <- data.frame(
+  group_label = "Low Shedder", 
+  time = time_grid,
+  
+  # fit a smooth curve through time-specific medians 
+  median = predict(
+    loess(median ~ time, 
+          data = low_data,
+          span = 0.8),
+    newdata = data.frame(time = time_grid) %>%
+      pmax(limit_of_detection) %>%
+      data.frame(group_label = "Low Shedder",
+                 time = time_grid,
+                 median = .)
+  ),
+  
+  q1 = predict(
+    loess(q1 ~ time, 
+          data = low_data, 
+          span = 0.8),
+    newdata = data.frame(time = time_grid)
+  ),
+  
+  q3 = predict(
+    loess(q3 ~ time,
+          data = low_data, 
+          span = 0.8),
+    newdata = data.frame(time = time_grid)
+  )
+)
+
+### plotting low shedders
+observed_low_shed <- ggplot()+
+  
+  # median
+  geom_line(data = low_shedders_smooth,
+          aes(x = time, 
+              y = median, 
+              color = "#E74C3C"),
+          linewidth = 1) + 
+  
+  #Ribbon: use linetype = "dotted" if want dotted instead of ribbon
+  geom_ribbon(data = low_shedders_smooth,
+              aes(x = time, 
+                  ymin = q1, 
+                  ymax = q3), 
+              fill = "#E74C3C",
+              alpha = 0.5
+              ) + 
+  
+  # Labeling of plot
+  labs(x = "DPI", 
+       y = "Viral Titer",
+       title = "Low-Shedders: Median Viral Load"  
+  ) +
+  
+  # Themes
+  theme_minimal(base_size = 12)+
+  theme(
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black"),
+    legend.position = c(0.9, 0.88),     # top right position
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+  ) +
+  
+  # x-axis labeling
+   scale_x_continuous(limits = c(0, 10), breaks = seq(0, 10, by = 2))+
+  
+  # y-axis labeling
+  scale_y_continuous(
+   # name = expression(paste("Viral titer (log"[10], " TCID"[50], "/mL)")),
+    breaks = seq(0, 7, by = 1),
+    limits = c(0, 7)
+  )
+          
+
+print(observed_low_shed)
+  
+```
+
+```{r High Shedder Plot: LOESS Median Plot}
+# group_colors <- c("Low-shedder" = "#E74C3C", "High-shedder" = "#3498DB")
+###------------ High Shedder ------------ ###
+# -- pop_summary df has "group_label" as "Low Shedders" and "High Shedder" 
+# -- CASE SENSITIVE!!!
+# smooth median and IQR curves for low and high shedders pulling from 
+# pop_summary
+high_data <- pop_summary %>%
+  filter(group_label == "High Shedder")
+
+high_shedders_smooth <- data.frame(
+  group_label = "High Shedder", 
+  time = time_grid,
+  
+  median = predict(
+    loess(median ~ time, 
+          data = high_data,
+          span = 0.8  #0.5
+          ),
+    newdata = data.frame(time = time_grid) %>%
+      pmax(limit_of_detection) %>%
+      data.frame(group_label = "High Shedder",
+                 time = time_grid,
+                 median = .)
+  ),
+  
+  q1 = predict(
+    loess(q1 ~ time, 
+          data = high_data, 
+          span = 0.8),
+    newdata = data.frame(time = time_grid)
+  ),
+  
+  q3 = predict(
+    loess(q3 ~ time,
+          data = high_data, 
+          span = 0.8),
+    newdata = data.frame(time = time_grid)
+  )
+)
+
+###------------ plotting high shedders ------------###
+observed_high_shed <- ggplot()+
+  # median
+  geom_line(data = high_shedders_smooth,
+          aes(x = time, 
+              y = median, 
+              color = "#3498DB"),
+          linewidth = 1) + 
+  
+  #Q1: use linetype = "dotted" if want dotted instead of ribbon
+  geom_ribbon(data = high_shedders_smooth,
+              aes(x = time, 
+                  ymin = q1, 
+                  ymax = q3),
+              fill = "#3498DB",
+              alpha = 0.5
+              ) + 
+  # Labeling of plot
+  labs(x = "DPI", 
+       y = "Viral Titer",
+       title = "High-shedders: Median Viral Load"  
+  ) +
+  
+  # Themes
+  theme_minimal(base_size = 12)+
+  theme(
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black"),
+    legend.position = c(0.9, 0.88),     # top right position
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+  ) +
+  
+  # x-axis labeling
+   scale_x_continuous(limits = c(0, 10), breaks = seq(0, 10, by = 2))+
+  
+  # y-axis labeling
+  scale_y_continuous(
+    name = expression(paste("Viral titer (log"[10], " TCID"[50], "/mL)")),
+    breaks = seq(0, 7, by = 1),
+    limits = c(0, 7)
+  )
+
+print(observed_high_shed)
+
+
+```
+
+```{r Combined IQR with Ribbon plots}
+
+smooth_all <- bind_rows(
+  low_shedders_smooth,
+  high_shedders_smooth
+  # low_smooth,
+  # high_smooth
+)
+
+
+low_high_iqr_plot <- ggplot()+
+  
+  # individual observations all in gray
+  geom_line(data = flu_data,
+            aes(x = time, 
+                y = viral_titer, 
+                group = ID),
+            color = "gray40",
+            alpha = 0.3,
+            linewidth = 0.5)+
+  
+  # median lines
+  geom_line(data = smooth_all, 
+          aes(x = time, 
+              y = median, 
+              color = group_label), 
+          linewidth = 1.75
+          )+
+ geom_ribbon(data = smooth_all, 
+            aes(time,
+                ymin = q1, 
+                ymax = q3, 
+                fill = group_label),
+            alpha = 0.7)+
+  facet_wrap(~group_label)+ 
+  
+  scale_color_manual(
+      values = c(
+       "High Shedder" = "#3498DB",  # blue
+       "Low Shedder"  = "#E74C3C"   # red
+      ), 
+      name = "Group"
+    ) +
+  scale_fill_manual(
+      values = c(
+        "High Shedder" = "#3498DB",  # blue
+        "Low Shedder"  = "#E74C3C"   # red
+       ),
+      name = "Group"
+   )+ 
+  # Labeling of plot
+  labs(x = "DPI", 
+       y = "Viral Titer"
+       #title = "Median Viral Load"  
+  ) +
+  
+  # Themes
+  theme_minimal(base_size = 35) + 
+  theme(
+    panel.grid.minor = element_blank(),
+    #panel.grid.major = element_blank(),
+    axis.line = element_line(color = "black"),
+    #axis tick labels
+    axis.text.x = element_text(size = 22),
+    axis.text.y = element_text(size = 22),
+    #axis titles
+    axis.title.x = element_text(size = 22, face = "bold"),
+    axis.title.y = element_text(size = 22, face = "bold"),
+    #legend position 
+    legend.position = c(0.9, 0.88),    
+    #legend title
+    legend.title = element_text(size = 24, face = "bold"),
+    #plot.title = element_text(size = 24, face = "bold", hjust = 0.5)
+  ) +
+  
+  # x-axis labeling
+   scale_x_continuous(limits = c(0, 10), 
+                      breaks = seq(0, 10, by = 2),
+                      name = expression(paste("Days Post Infection (DPI)")),)+
+  
+  # y-axis labeling
+  scale_y_continuous(
+    name = expression(paste("Viral Titer (log"[10], " TCID"[50], "/mL)")),
+    breaks = seq(0, 7, by = 2),
+    limits = c(0, 7)
+  )
+
+
+print(low_high_iqr_plot)
+
+## Add into Figures Folder
+## "/Users/angela.tower/Library/CloudStorage/OneDrive-WashingtonStateUniversity(email.wsu.edu)/Research/Codes/Influenza Project/Figures/"
+
+#ggsave("Figures/low_high_iqr_plot.png", low_high_iqr_plot, width = 16, height = 10, dpi = 400)
+
+
+```
+
+
