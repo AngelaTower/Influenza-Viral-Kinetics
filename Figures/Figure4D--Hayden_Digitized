@@ -1,0 +1,137 @@
+---
+title: "Flu_Manuscript_Figure4D"
+author: "Angela Tower"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r Clear Environment}
+## Start with a clear workspace
+rm(list = ls())
+```
+
+# Digitized data from Figure 3 of Hayden 2018 NEJM paper
+```{r Digitized Plot}
+library(ggplot2)
+library(tidyr)
+
+# Digitized data from Hayden et al., 2018 - Figure 3 
+dig_data <- data.frame(
+  Day = c(1, 2, 3, 4, 5, 6, 9),
+  Baloxavir   = c(0.0, -4.4, -4.9, -4.5, -4.9, -4.6, -5.0),
+  Placebo     = c(0.0, -1.2, -2.8, -3.2, -4.4, -4.6, -4.9),
+  Oseltamivir = c(0.0, -2.5, -4.2, -4.6, -5.0, -4.8, -5.2)
+)
+
+# Convert to long format
+data_long <- pivot_longer(
+  dig_data ,
+  cols = -Day,
+  names_to = "Treatment",
+  values_to = "MeanChange"
+)
+
+# Combined plot
+digit_treatment_plot <- ggplot(data_long,
+       aes(x = Day,
+           y = MeanChange,
+           color = Treatment,
+           shape = Treatment,
+           group = Treatment)) +
+  geom_line(linewidth = 1) +
+  
+  geom_point(size = 3) +
+  
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  
+  scale_x_continuous(breaks = c(1, 2, 3, 4, 5, 6, 7, 8, 9)) +
+  
+  labs(
+    title = "Mean Change in Virus Titer",
+    x = "Day",
+    y = expression("Mean Change in Virus Titer ("*log[10]*" TCID"[50]*"/mL)")
+  ) +
+  
+  scale_color_manual(
+    values = c(
+      "Baloxavir" = "purple2",
+      "Placebo" = "gray4",
+      "Oseltamivir" = "orange2"
+    )
+  ) + 
+  
+  theme_bw(base_size = 20) +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_blank(),
+    plot.title = element_text(hjust = 0.5, size = 20, face = "bold"),
+    #legend.title = element_blank()
+    legend.text = element_text(size = 20),
+    legend.position = c(0.85, 0.8),  
+  )
+
+## Add into Figures Folder
+## "/Users/angela.tower/Library/CloudStorage/OneDrive-WashingtonStateUniversity(email.wsu.edu)/Research/Codes/Influenza Project/Figures/"
+ggsave("Figures/digit_Hayden_NEJM.png", digit_treatment_plot, 
+       width = 10,
+       height = 6, dpi = 500, 
+       background = "transparent")
+
+print(digit_treatment_plot)
+
+```
+
+# Digitized Figure 3 (Hayden 2018 NEJM) with error bars
+```{r Digitized w/ Error Bars}
+library(tidyverse)
+
+# Digitized data from Hayden et al., 2018 - Figure 3 
+dat <- tribble(
+  ~Day, ~Treatment, ~Mean, ~Error,
+  1, "Baloxavir",    0.0, 0.0,
+  2, "Baloxavir",   -4.4, 2.1,
+  3, "Baloxavir",   -4.9, 2.0,
+  4, "Baloxavir",   -4.5, 1.0,
+  5, "Baloxavir",   -4.9, 1.9,
+  6, "Baloxavir",   -4.6, 2.1,
+  9, "Baloxavir",   -5.0, 2.0,
+
+  1, "Placebo",      0.0, 0.0,
+  2, "Placebo",     -1.2, 1.8,
+  3, "Placebo",     -2.8, 2.8,
+  4, "Placebo",     -3.2, 2.3,
+  5, "Placebo",     -4.4, 2.2,
+  6, "Placebo",     -4.6, 2.1,
+  9, "Placebo",     -4.9, 2.0,
+
+  1, "Oseltamivir",  0.0, 0.0,
+  2, "Oseltamivir", -2.5, 2.0,
+  3, "Oseltamivir", -4.2, 2.0,
+  4, "Oseltamivir", -4.6, 2.0,
+  5, "Oseltamivir", -5.0, 2.0,
+  6, "Oseltamivir", -4.8, 2.1,
+  9, "Oseltamivir", -5.2, 1.9
+)
+
+ggplot(dat,
+       aes(Day, Mean,
+           color = Treatment,
+           shape = Treatment,
+           group = Treatment)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 3) +
+  geom_errorbar(
+    aes(ymin = Mean - Error,
+        ymax = Mean + Error),
+    width = 0.15,
+    linewidth = 0.5
+  ) +
+  geom_hline(yintercept = 0,
+             linetype = "dashed") +
+  scale_x_continuous(breaks = c(1,2,3,4,5,6,7,8,9)) +
+  theme_bw() +
+  labs(
+    x = "Day",
+    y = expression("Mean Change in Virus Titer ("*log[10]*" TCID"[50]*"/mL)")
+  )
+```
