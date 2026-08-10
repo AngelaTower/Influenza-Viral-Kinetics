@@ -3,7 +3,7 @@
 # More rapid influenza virus elimination on baloxavir versus oseltamivir can be explained by drug mechanism
 Preprint: https://doi.org/10.21203/rs.3.rs-10282651/v1
 
-Authors: Tower, A (1), Schwartz, E., (1), Duke, E.,(2), Schiffer, J. (3), Esmaeili, S. (3), Owens, K. (3)
+Authors: Tower, A (1), Schwartz, E., (1), Duke, E.,(2), Schiffer, J. (3), Esmaeili, S. (3), Owens, K. (3*)
 
 # Contents:
 This repository contains supporting files for the results reported in the manuscript.
@@ -19,6 +19,7 @@ Provided in the `data` folder consists of the following:
 1.   Washington State University
 2.  U.S. Department of Veterans Affairs
 3.  Fred Hutchinson Cancer Center, Vaccine and Infectious Diseases Division
+   *Corresponding author
 
 
 
