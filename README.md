@@ -16,7 +16,7 @@ Provided in the `data` folder consists of the following:
 
 
 # 
-1.   Washington State University
+1.   Washington State University - Department of Mathematics and Statistics 
 2.  U.S. Department of Veterans Affairs
 3.  Fred Hutchinson Cancer Center, Vaccine and Infectious Diseases Division
    *Corresponding author
