@@ -1,0 +1,1852 @@
+---
+title: "Flu_Manuscript_Figures_1_2_3_SuppFig3"
+author: "Angela Tower"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup}
+## Start with a clear workspace
+rm(list = ls())
+```
+
+### Load in libraries
+```{r Libraries}
+## Load libraries
+library(deSolve)
+library(ggplot2)
+library(minpack.lm)
+library(Rsmlx)
+library(dplyr)
+library(scales)
+library(gridExtra)
+library(cowplot)
+library(ggpubr)
+library(grid)
+library(tidyr)
+```
+
+### Load in data
+```{r Observed Data}
+
+# Mac directory
+base_directory <- "~/OneDrive - Fred Hutch Cancer Center/IAV Data/Monolix/Truncated Fittings/Projects"
+
+flu_data <- read.csv(file.path(base_directory, "flu_all_truncated.csv"),
+                     header = TRUE,
+                     stringsAsFactors = FALSE,
+                     sep = ",")
+
+IDs <- unique(flu_data[,"ID"])
+
+# Define the two cohorts
+# Note: controllers = low shedders; non-controllers = high shedders
+controllers <- c("61A",
+                 "67A",
+                 "49B-A",
+                 "53B-A",
+                 "60B-A",
+                 "19B-B", 
+                 "207B-B", 
+                 "213B-B", 
+                 "312B-B", 
+                 "342B-B", 
+                 "53B-B")
+
+non_controllers <- c("4A",
+                     "12A",
+                     "18A", 
+                     "30A", 
+                     "33A", 
+                     "48A", 
+                     "52A", 
+                     "71A", 
+                     "77A",
+                     "14B-A", 
+                     "16B-A", 
+                     "18B-A",
+                     "21B-A", 
+                     "28B-A", 
+                     "65B-A", 
+                     "66B-A",
+                     "4B-B", 
+                     "12B-B", 
+                     "15B-B",
+                     "304B-B",
+                     "317B-B", 
+                     "327B-B", 
+                     "329B-B",
+                     "331B-B",
+                     "336B-B", 
+                     "337B-B",
+                     "344B-B", 
+                     "350B-B", 
+                     "55B-B", 
+                     "62B-B", 
+                     "65B-B", 
+                     "70B-B", 
+                     "73B-B"
+                     )
+
+
+```
+
+### Load Monolix Estimated Individual Parameters
+```{r Monolix Folders}
+# -------------------------------- #
+# Censored interior negative tests #
+# -------------------------------- #
+M4a_fixed_c_beta <- "~/OneDrive - Fred Hutch Cancer Center/IAV Data/Monolix/Truncated Fittings/Projects/Test Models/Shifted Bounds - M4a/M4a_shifted_Hill8_fixed_c_Owens/"
+
+# ---------------------------------- #
+# Uncensored interior negative tests #
+# ---------------------------------- #
+## fixed h=8, k=0.01, beta = -6.3, c = 15: "M4a_shifted_Hill8_fixed_c_beta_uncens.mlxtran" (Run 5)
+#M4a_fixed_c_beta_uncens <- "~/OneDrive - Fred Hutch Cancer Center/IAV Data/Monolix/Truncated Fittings/Projects/Test Models/Shifted Bounds - M4a/Uncensored/M4a_shifted_Hill8_fixed_c_beta_uncens/Assessment/Assessment_005/Assessment_005"
+
+# ---------------------- #
+# Read in parameter file
+# ---------------------- #
+########## Model 4a param files ########## 
+pop_params <- read.csv(file.path(
+                       M4a_fixed_c_beta,
+                       "populationParameters.txt"),
+                       header = TRUE,
+                       sep = ",")
+
+# convert the log-transformed parameters: (convert the original parameters)
+beta <- 10^pop_params[pop_params$parameter == "log10beta_pop","value"] 
+
+p    <- 10^pop_params[pop_params$parameter == "log10p_pop","value"] 
+
+eta  <- 10^pop_params[pop_params$parameter == "log10eta_pop","value"] 
+
+phi  <- 10^pop_params[pop_params$parameter == "log10phi_pop","value"] 
+
+# ---------------------------------- #
+#  M4a_individual param files 
+# ---------------------------------- #
+individual_params <- read.csv(file.path(
+                              M4a_fixed_c_beta,      #fixed c = 15 (Owens) and beta = -6.3 (pop estimates)
+"IndividualParameters/estimatedIndividualParameters.txt"),
+                              header = TRUE,
+                              sep = ",")
+
+
+# convert the log-transformed parameters: (convert the original parameters only ONCE)
+individual_params$log10beta_mode  <- 10^individual_params$log10beta_mode
+individual_params$log10p_mode     <- 10^individual_params$log10p_mode
+individual_params$log10eta_mode   <- 10^individual_params$log10eta_mode
+individual_params$log10phi_mode   <- 10^individual_params$log10phi_mode
+
+pi <- individual_params$log10p_mode
+
+head(individual_params)
+```
+
+## ODE Model 4: Simulating with and WITHOUT immune responses to compare the viral kinetics across individuals
+## Speculations that the viral dynamics should be the same and the contributing differences come from the immune components within model
+```{r Model4: ODE System}
+# -----------------------------------------#
+# Viral Dynamics Model for simulation
+# -----------------------------------------#
+teirv_model <- function(time, state, parameters){
+  with(as.list(c(state, parameters)),{
+    ddt_T  = -beta*T*V - phi*Ip*T + eta*R
+    ddt_Ie = beta*T*V - gamma*Ie               
+    ddt_Ip = gamma*Ie - delta*Ip - k*Ip*E  
+    ddt_R  = phi*Ip*T - eta*R
+    #ddt_V  = p*Ip - c*V
+    ddt_V  = pi*Ip - c*V
+    ddt_E  = theta*E*Ip^h/(Ip^h+r^h)        # Hill Coefficient (h)
+
+    return(list(c(
+      dT  = ddt_T,
+      dIe = ddt_Ie,
+      dIp = ddt_Ip,
+      dR  = ddt_R,
+      dV  = ddt_V,
+      dE  = ddt_E
+    )))
+  })
+}
+```
+
+#-------- Figure 1 of Manuscript -----------#
+#Model fit results 
+#-------------------------------------------#
+```{r For-loop: Numericallly Solve and Simulate Virus Dynamics Model}
+# Containers to store outputs 
+#plot_list <- list()
+all_outputs <- list()
+
+limit_of_detection <- 1e-10  # Adjust based on LODs
+
+#extract and plot for each volunteer within for-loop
+for(ID in IDs){
+  
+  i = which(individual_params$id == ID)
+  
+  # Volunteer data
+  volunteer_data <- flu_data[flu_data$ID == ID,]
+
+
+######################################################
+# Virus: parameter estimates obtained from the data frame for the specific ID
+# parameter estimated from MONOLIX (SAEM algorithm) simulation
+params <- c(
+  beta   = individual_params[i,"log10beta_mode"],      #infectivity rate
+  delta  = individual_params[i,"delta_mode"],          #death rate of Ip cells
+  pi 	   = individual_params[i,"log10p_mode"],         #production rate of V
+  eta	   = individual_params[i,"log10eta_mode"],       #reversion from refractory to target cell
+  phi    = individual_params[i,"log10phi_mode"],       #conversion to refractory state from target cell 
+  c	     = individual_params[i,"c_mode"],              #fixed
+  gamma	 = individual_params[i,"gamma_mode"],           #delay from Ie to Ip
+  r	     = individual_params[i,"r_mode"],              #pmin(estimates_2a[i,"r_mode"], upper_bounds$r),
+  theta  = individual_params[i,"theta_mode"],          #pmin(estimates_2a[i,"theta_mode"], upper_bounds$theta),
+  k	     = individual_params[i,"k_mode"],
+  h      = individual_params[i,"h_mode"]        #ADJUST h-parameter to a fixed value!
+)
+
+################################################################################
+# Initial conditions for each compartment
+  T_0  = 1*10^7            # Owens et al., 2025
+  Ie_0 = 0
+  Ip_0 = 0
+  R_0  = 0
+  V_0 = 0.075               
+
+# Estimated initial effector cells
+  E_0 = individual_params[i,"E0_mode"]
+
+#generate a sequence of time 
+  time_values <- seq(0, 14, by = 0.1)  
+
+#initialize vector of initial conditions
+  init_conditions <- c( T = T_0,
+                       Ie = Ie_0,
+                       Ip = Ip_0,
+                       R = R_0,
+                       V  = V_0,
+                       E  = E_0
+                      )
+######################################################
+###### SIMULATING THE MODEL ###########
+######################################################
+output <- ode(y = init_conditions,
+           times = time_values,
+            func = teirv_model,        # refractory_immune_only, #teirv_model
+           parms = params, 
+          method = "lsoda",         # lsoda for stiff systems (vastly different time scales), bdf, adams
+           atol  = 1e-6,
+           rtol  = 1e-6,
+           hmax  = 0.1
+          )                         
+
+output[,-1] <- pmax(output[,-1], 1e-10)       # applying lower bound: 1E-10 to all outputs
+output <- as.data.frame(output)
+
+
+
+##############################################################################
+# Add metadata - Change the labeling of group here
+## ----------  CHANGE LABELING HERE -------------## 
+# The labeling here will conflict with generating the counterfactual plots below
+output$ID <- ID
+output$group <- ifelse(ID %in% controllers, "Low-shedder", "High-shedder")
+#output$group <- ifelse(ID %in% controllers, "Low Shedder", "High Shedder")
+
+#--------------------------------------------------------------- #
+# Log-transforming VL and set values below 1e-10 (LOD) to 0 
+#--------------------------------------------------------------- #
+  output$viral_load_log10 <- log10(output$V)
+  output$viral_load_plot <- ifelse(output$viral_load_log10 < limit_of_detection, 
+                                   0, output$viral_load_log10)
+  
+#--------------------------------------------------------------- #
+# Log-transforming Refractory Compartment and setting lower LOD 
+#--------------------------------------------------------------- #
+   output$refrac_log10 <- log10(output$R)
+   output$refrac_plot <-  ifelse(output$refrac_log10 < limit_of_detection,
+                                 0, output$refrac_log10)      # Refractory cells
+   
+#--------------------------------------------------------------- #
+# Log-transforming Effector Compartment and setting lower LOD 
+#--------------------------------------------------------------- #
+   output$effector_log10 <- log10(output$E)
+   output$effector_plot <- ifelse(output$effector_log10 < limit_of_detection,
+                                  0, output$effector_log10)    # Effector cells  
+   
+     
+#--------------------------------------------------------------- #
+# Log-transforming Infected Cells (Ip) Compartment and setting lower LOD 
+#--------------------------------------------------------------- #
+   output$infected_log10 <- log10(output$Ip)
+   output$infected_plot <- ifelse(output$infected_log10 < limit_of_detection,
+                                  0, output$infected_log10)       # Infected cells
+   
+        
+#--------------------------------------------------------------- #
+# Log-transforming Target Cells (T) Compartment 
+#--------------------------------------------------------------- #
+   output$T <- log10(output$T)
+   
+   output$Ie <- log10(output$Ie)
+   output$Ip <- log10(output$Ip)
+   
+   total_infected_cells <- output$Ie + output$Ip
+
+
+#--------------------------------------------------------------- #
+#  PLOT SIMULATED RESULTS
+#--------------------------------------------------------------- #
+  
+vl_plot <- ggplot() + 
+    # Model Simulation: Viral load
+    geom_line(data = output, 
+              aes(x = time, y = viral_load_plot, color = "Viral Titer"), 
+              linewidth = 1.2, alpha = 0.7, linetype = "solid") +
+
+#---------------------------------------------------------------  
+# Model Simulation: Effector cells
+# UNCOMMENT TO PLOT THE EFFECTOR CELL POPULATION
+    # geom_line(data = output,
+    #       aes(x = time, y = effector_plot, color = "Effector Cells"),
+    #          linewidth = 1, alpha = 0.5, linetype = "solid") +
+
+#--------------------------------------------------------------- #
+# Model Simulation: Refractory cells
+# UNCOMMENT BELOW TO PLOT THE REFRACTORY CELL POPULATION
+     geom_line(data = output,
+           aes(x = time, y = refrac_plot, color = "Refractory Cells"),
+               linewidth = 1, alpha = 0.5, linetype = "dashed") +
+
+#--------------------------------------------------------------- #
+# Model Simulation: Target cells
+# UNCOMMENT BELOW TO PLOT THE TARGET CELL POPULATION  
+     geom_line(data = output,
+           aes(x = time, y = T , color = "Target Cells"),
+              linewidth = 1, alpha = 0.5, linetype = "solid") +
+     
+#--------------------------------------------------------------- #
+# Model Simulation: Infected cells - Ip
+# UNCOMMENT BELOW TO PLOT THE TOTAL INFECTED CELL POPULATION ### 
+    # geom_line(data = output,
+    #       aes(x = time, y = Ip, color = "Infected Cells"), 
+    #          linewidth = 1, alpha = 0.7, linetype = "solid") +   
+     
+  
+#--------------------------------------------------------------- #
+# Observed volunteer data points 
+#--------------------------------------------------------------- #
+    geom_point(data = volunteer_data, 
+               aes(x = time, y = viral_titer, color = ifelse(ID %in% controllers, "Low-shedder", "High-shedder")), 
+               size = 2.5, alpha = 0.9) +
+    
+    # Add limit of detection line (here, the LOD is to 1e-10 for plotting)
+    geom_hline( yintercept = 1e-10, 
+                linetype = "dashed",
+                color = "gray30",
+                alpha = 0.7) +
+    
+    # Styling similar to Iyaniwura (2024, SARS-CoV-2 on human challenge) paper
+    scale_color_manual(
+      values = c("Viral Titer" = "red3",
+                 # UNCOMMENT BELOW TO PLOT THE EFFECTOR CELL POPULATION
+                 "Effector Cells" = "purple4",
+                 "Refractory Cells" = "#F39C12",
+                 "LoD" = "gray50",
+                 "Target Cells" = "lightblue"
+                 ),
+      breaks = c("Viral Titer", "Effector Cells", "Refractory Cells", "Target Cells", "Infected Cells", "LoD"),  
+      name = "Compartment"
+    ) +
+    
+    
+  ################ x-axis scaling ################ 
+    scale_x_continuous(
+      name = "Days post-inoculation (DPI)",
+      breaks = seq(0, 14, by = 2),
+      limits = c(0, 14)
+    ) +
+    
+  ################ y-axis scaling ################ 
+    scale_y_continuous(
+      name = expression(paste("Viral load (log"[10], " TCID"[50], "/mL)")),
+      breaks = seq(0, 8, by = 1),
+      limits = c(0, 8)
+    ) +
+    
+    labs(title = paste("Volunteer", ID)) +
+    
+  ################ plotting themes ################ 
+    theme_classic() +
+    theme(
+      panel.grid.major.y = element_line(color = "gray90", size = 0.3),
+      legend.position = "right",  # Show legend for compartments
+      legend.title = element_text(size = 10, face = "bold"),
+      legend.text  = element_text(size = 9),
+      axis.title   = element_text(size = 11, face = "bold"),
+      axis.text    = element_text(size = 10),
+      plot.title.  = element_text(size = 12, face = "bold", hjust = 0.5),
+      panel.border = element_rect(color = "black", fill = NA, size = 0.5)
+    )
+  
+# Add virus plot to list
+ #plot_list[[as.character(ID)]] <- vl_plot
+ all_outputs[[as.character(ID)]] <- output
+
+ print(vl_plot)
+ #print(effector_plot)
+}
+
+
+# Combine all plots into a single arrangement
+ combined_output <- do.call(rbind, all_outputs)
+
+
+# Save the combined plot to a single file
+# ggsave("All_VL_plots.pdf", combined_plot, width = 20, height = 55, limitsize = FALSE)
+ 
+```
+
+## Running with EFFECTOR (innate) immune parameters SET to 0 
+```{r For-loop: Simulate Model with effector parameters = 0}
+
+# Containers to store outputs 
+all_outputs_no_effector <- list()
+
+# Effector parameters: k, theta, r, h
+# Extract and plot for each volunteer within for-loop
+for(ID in IDs){
+  
+  i = which(individual_params$id == ID)
+  
+  # Volunteer data
+  volunteer_data <- flu_data[flu_data$ID == ID,]
+
+#--------------------------------------------------------------- #
+# Virus: parameter estimates obtained from the data frame for the specific ID
+# parameter estimated from MONOLIX (SAEM algorithm) simulation
+# Effector params: r, theta, k, h
+#--------------------------------------------------------------- #
+no_effector_params <- c(
+  beta   = individual_params[i,"log10beta_mode"],      #infectivity rate
+  delta  = individual_params[i,"delta_mode"],          #death rate of Ip cells
+  pi 	   = individual_params[i,"log10p_mode"],         #production rate of V
+  eta	   = individual_params[i,"log10eta_mode"],       #reversion from refractory to target cell
+  phi    = individual_params[i,"log10phi_mode"],       #conversion to refractory state from target cell 
+  c	     = individual_params[i,"c_mode"],              #fixed
+  gamma	 = individual_params[i,"gamma_mode"],           #delay from Ie to Ip
+  r	     = 0,        #pmin(estimates_2a[i,"r_mode"], upper_bounds$r),
+  theta  = 0,        #pmin(estimates_2a[i,"theta_mode"], upper_bounds$theta),
+  k	     = 0,
+  h      = 0            
+)
+
+#--------------------------------------------------------------- #
+# Initial conditions for each compartment
+  T_0  = 1*10^7            # Owens et al., 2025
+  Ie_0 = 0
+  Ip_0 = 0
+  R_0  = 0
+  V_0 = 0.075               
+
+# Estimated initial effector cells
+E_0 = individual_params[i,"E0_mode"]
+
+#generate a sequence of time 
+  time_values <- seq(0, 14, by = 0.1)  
+
+#initialize vector of initial conditions
+  init_conditions <- c( T = T_0,
+                       Ie = Ie_0,
+                       Ip = Ip_0,
+                       R = R_0,
+                       V  = V_0,
+                       E  = E_0
+                      )
+#--------------------------------------------------------------- #
+# SIMULATING THE MODEL 
+#--------------------------------------------------------------- #
+output_no_effector <- ode(y = init_conditions,
+                      times = time_values,
+                      func = teirv_model,        # refractory_immune_only, #teirv_model
+                      parms = no_effector_params, 
+                      method = "lsoda",         # lsoda for stiff systems (vastly different time scales), bdf, adams
+                      atol  = 1e-6,
+                      rtol  = 1e-6,
+                      hmax  = 0.1
+                      )                         
+
+output_no_effector[,-1] <- pmax(output_no_effector[,-1], 1e-10)       # applying lower bound: 1E-10 to all outputs
+output_no_effector <- as.data.frame(output_no_effector)
+
+# Add metadata
+output_no_effector$ID <- ID
+output_no_effector$group <- ifelse(ID %in% controllers, "Low-shedder", "High-shedder")
+
+# Use this setting if colors are not showing correctly
+#output_no_effector$group <- ifelse(ID %in% controllers, "Low Shedder", "High Shedder")
+
+
+#--------------------------------------------------------------- #
+# Log-transforming VL and set values below 1e-10 (LOD) to 0
+#--------------------------------------------------------------- #
+  output_no_effector$viral_load_log10 <- log10(output_no_effector$V)
+  output_no_effector$viral_load_plot <- ifelse(output_no_effector$viral_load_log10 < limit_of_detection,
+                                   0, output_no_effector$viral_load_log10)
+  
+#--------------------------------------------------------------- #
+# Log-transforming Refractory Compartment and setting lower LOD
+#--------------------------------------------------------------- #
+   output_no_effector$refrac_log10 <- log10(output_no_effector$R)
+   output_no_effector$refrac_plot <-  ifelse(output_no_effector$refrac_log10 < limit_of_detection,
+                                 0, output_no_effector$refrac_log10)      # Refractory cells
+   
+  
+##############################################################################
+### Log-transforming Effector Compartment and setting lower LOD ### 
+##############################################################################
+   output_no_effector$effector_log10 <- log10(output_no_effector$E)
+   output_no_effector$effector_plot <- ifelse(output_no_effector$effector_log10 < limit_of_detection,
+                                  0, output_no_effector$effector_log10)    # Effector cells  
+   
+     
+#--------------------------------------------------------------- #
+# Log-transforming Infected Cells (Ip) Compartment and setting lower LOD ### 
+#--------------------------------------------------------------- #
+   output_no_effector$infected_log10 <- log10(output_no_effector$Ip)
+   output_no_effector$infected_plot <- ifelse(output_no_effector$infected_log10 < limit_of_detection,
+                                  0, output_no_effector$infected_log10)       # Infected cells
+
+#--------------------------------------------------------------- #
+# Log-transforming Target Cells (T) Compartment ### 
+#--------------------------------------------------------------- #
+   output_no_effector$T <- log10(output_no_effector$T)
+  
+
+#--------------------------------------------------------------- #
+#  PLOT SIMULATED RESULTS
+#--------------------------------------------------------------- #
+  
+vl_plot_no_effector <- ggplot() + 
+    # Model Simulation: Viral load
+    geom_line(data = output_no_effector, 
+              aes(x = time, y = viral_load_plot, color = "Viral Titer"), 
+              linewidth = 1.2, 
+              alpha = 0.7, 
+              linetype = "solid") +
+  
+#--------------------------------------------------------------- #
+# Model Simulation: Target cells
+# UNCOMMENT BELOW TO PLOT THE Target CELL population with Effector + Refractory in effect 
+     geom_line(data = output,
+           aes(x = time, y = log10(T) , color = "Target (w/ IR)"),
+              linewidth = 1, 
+              alpha = 0.5,
+              linetype = "solid") +
+     
+#--------------------------------------------------------------- #
+# Model Simulation: Target cells
+# UNCOMMENT BELOW TO PLOT THE Target CELL population w/o Effector Cells in effect ### 
+     geom_line(data = output_no_effector,
+           aes(x = time, y = T ,
+               color = "Target (w/o IR)"),
+               linewidth = 1,
+               alpha = 0.5,
+               linetype = "solid") +
+  
+#--------------------------------------------------------------- #
+# Observed volunteer data points 
+#--------------------------------------------------------------- #
+    geom_point(data = volunteer_data, 
+               aes(x = time, y = viral_titer, color = ifelse(ID %in% controllers, "Low-shedder", "High-shedder")), 
+               size = 2.5, alpha = 0.9) +
+    
+    # Add limit of detection line (here, the LOD is to 1e-10 for plotting)
+    geom_hline( yintercept = 1e-10, 
+                linetype = "dashed",
+                color = "gray30",
+                alpha = 0.7) +
+    
+    # Styling similar to Iyaniwura (2024, SARS-CoV-2 on human challenge) paper
+    scale_color_manual(
+      values = c("Viral Titer" = "red3",
+                 # UNCOMMENT BELOW TO PLOT THE EFFECTOR CELL POPULATION
+                 "Effector Cells" = "purple4",
+                 #"Refractory Cells" = "#F39C12",
+                 "Target (w/ IR)" = "cadetblue3",
+                 "Target (w/o IR)" = "darkblue",
+                 "LoD" = "gray50"
+                 ),
+      breaks = c("Viral Titer", "Effector Cells", "Target (w/ IR)", "Target (w/o IR)", "LoD"),  
+      name = "Compartment"
+    ) +
+    
+    
+  ################ x-axis scaling ################ 
+    scale_x_continuous(
+      name = "Days post-inoculation (DPI)",
+      breaks = seq(0, 14, by = 2),
+      limits = c(0, 14)
+    ) +
+    
+  ################ y-axis scaling ################ 
+    scale_y_continuous(
+      name = expression(paste("Viral load (log"[10], " TCID"[50], "/mL)")),
+      breaks = seq(0, 8, by = 1),
+      limits = c(0, 8)
+    ) +
+    
+    labs(title = paste("Volunteer", ID)) +
+    
+  ################ plotting themes ################ 
+    theme_classic() +
+    theme(
+      panel.grid.major.y = element_line(color = "gray90", size = 0.3),
+      legend.position = "right",  # Show legend for compartments
+      legend.title = element_text(size = 10, face = "bold"),
+      legend.text  = element_text(size = 9),
+      axis.title   = element_text(size = 11, face = "bold"),
+      axis.text    = element_text(size = 10),
+      plot.title.  = element_text(size = 12, face = "bold", hjust = 0.5),
+      panel.border = element_rect(color = "black", fill = NA, size = 0.5)
+    )
+  
+# Add virus plot to list
+#plot_list[[as.character(ID)]] <- vl_plot_no_effector
+ all_outputs_no_effector[[as.character(ID)]] <- output_no_effector 
+
+ print(vl_plot_no_effector)
+}
+
+# Combine all plots into a single arrangement
+ combined_output_no_effector <- do.call(rbind, all_outputs_no_effector)
+
+```
+
+## Facet all simulated plots with EFFECTOR params SET to 0 together
+## Simulating the viral dynamics without adaptive immune response 
+```{r Faceted plots with effector parameters = 0}
+#--------------------------------------------------------------- #
+# Categorize the plots: Natural/numeric order with number first, then letter
+# This handles cases like "4A", "12A", "18A", "30A", "33A"...
+#--------------------------------------------------------------- #
+if(all(grepl("^[0-9]+[A-Za-z]+$", unique(combined_output_no_effector$ID)))) {
+  # Extract number and letter parts (number comes first in ID)
+  id_parts <- data.frame(
+    ID = unique(combined_output_no_effector$ID),
+    numbers = as.numeric(gsub("[A-Za-z]+$", "", unique(combined_output_no_effector$ID))),
+    letters = gsub("^[0-9]+", "", unique(combined_output_no_effector$ID))
+  ) %>%
+    arrange(numbers, letters)  # Sort by number first, then letter
+  
+  # FIXED: Use the ordered id_parts$ID, not sort()
+  combined_output_no_effector$ID_natural <- factor(combined_output_no_effector$ID, levels = id_parts$ID)
+  
+} else if(all(grepl("^[A-Za-z]+[0-9]+$", unique(combined_output_no_effector$ID)))) {
+  # Handle cases like P1, P2, P10 (letter first, then number)
+  id_parts <- data.frame(
+    ID = unique(combined_output_no_effector$ID),
+    letters = gsub("[0-9]+$", "", unique(combined_output_no_effector$ID)),
+    numbers = as.numeric(gsub("^[A-Za-z]+", "", unique(combined_output_no_effector$ID)))
+  ) %>%
+    arrange(letters, numbers)
+  
+  # FIXED: Use the ordered id_parts$ID, not sort()
+  combined_output_no_effector$ID_natural <- factor(combined_output_no_effector$ID, levels = id_parts$ID)
+  
+} else {
+  # Fallback to alphabetical if pattern doesn't match
+  combined_output_no_effector$ID_natural <- factor(combined_output_no_effector$ID, levels = sort(unique(combined_output_no_effector$ID)))
+}
+
+# Set the ordering
+combined_output_no_effector$ID_ordered <- combined_output_no_effector$ID_natural
+
+# Create faceted plot: individual participant plotted
+faceted_plot_no_effector <- ggplot() +
+    
+#--------------------------------------------------------------- #
+# Model Simulation: Simulated Viral load - colored by group
+  geom_line(data = combined_output_no_effector,
+            aes(x = time, 
+                y = viral_load_plot, 
+                color = paste("Viral Load -", group),
+                group = ID),  # Group by ID for proper faceting
+            linewidth = 0.6, 
+            alpha = 0.6
+          ) +
+  
+  
+    
+#--------------------------------------------------------------- #
+# Model Simulation:Effector cells - purple color
+# UNCOMMENT BELOW TO PLOT THE EFFECTOR CELL POPULATION ### 
+  geom_line(data = combined_output_no_effector,
+             aes(x = time, 
+               y = effector_plot, 
+               color = "Effector Cells",
+               group = ID),  # Group by ID for proper faceting
+            linewidth = 0.7, 
+           alpha = 0.5) +
+  
+    
+#--------------------------------------------------------------- #
+# Model Simulation: Target cells - darkolive color without effectors
+# UNCOMMENT BELOW TO PLOT THE TARGET CELL POPULATION ### 
+  geom_line(data = combined_output_no_effector,
+             aes(x = time, 
+               y = T, 
+               color = "Target Cells (w/o adapative)",
+               group = ID),  # Group by ID for proper faceting
+            linewidth = 0.7, 
+            alpha = 0.6) +
+  
+#--------------------------------------------------------------- #
+# Model Simulation: Target cells from the virus dynamics model (w/ immune response)
+# UNCOMMENT BELOW TO PLOT THE EFFECTOR CELL POPULATION ### 
+     geom_line(data = output,
+           aes(x = time, y = T , color = "Target Cells (w/ IR)"),
+              linewidth = 1, alpha = 0.4, 
+           linetype = "solid") +
+  
+
+    
+#--------------------------------------------------------------- #
+# Model Simulation: Refractory cells - color: F39C12
+# UNCOMMENT BELOW TO PLOT THE REFRACTORY CELL POPULATION ### 
+  # geom_line(data = output,
+  #          aes(x = time, 
+  #              y = refrac_plot, 
+  #              color = "Refractory Cells",
+  #              group = ID),  # Group by ID for proper faceting
+  #            linewidth = 0.6, 
+  #          alpha = 0.5) +
+
+#--------------------------------------------------------------- #  
+# Observed data points
+  geom_point(data = {
+    obs_data <- do.call(rbind, lapply(IDs, function(id) {
+      vol_data <- flu_data[flu_data$ID == id,]
+      vol_data$group <- ifelse(id %in% controllers, "Low-shedder", "High-shedder")
+      vol_data$viral_load_plot <- ifelse(vol_data$viral_titer < limit_of_detection,
+                                         0, vol_data$viral_titer)
+      return(vol_data)
+    }))
+    
+  # Apply the same ordering as combined_output_no_effector
+    if(all(grepl("^[0-9]+[A-Za-z]+$", unique(obs_data$ID)))) {
+      # Order by number first, then letter (e.g., "4A", "12A", "18A", ...)
+      id_parts <- data.frame(
+        ID = unique(obs_data$ID),
+        numbers = as.numeric(gsub("[A-Za-z]+$", "", unique(obs_data$ID))),
+        letters = gsub("^[0-9]+", "", unique(obs_data$ID))
+      ) %>%
+        arrange(numbers, letters)
+      
+  # FIXED: Use id_parts$ID for the levels
+      obs_data$ID_ordered <- factor(obs_data$ID, levels = id_parts$ID)
+      
+    } else if(all(grepl("^[A-Za-z]+[0-9]+$", unique(obs_data$ID)))) {
+      
+  # Letter first, then number (e.g., "P1", "P2", "P10")
+      id_parts <- data.frame(
+        ID = unique(obs_data$ID),
+        letters = gsub("[0-9]+$", "", unique(obs_data$ID)),
+        numbers = as.numeric(gsub("^[A-Za-z]+", "", unique(obs_data$ID)))
+      ) %>%
+        arrange(letters, numbers)
+      
+  # FIXED: Use id_parts$ID for the levels
+      obs_data$ID_ordered <- factor(obs_data$ID, levels = id_parts$ID)
+      
+    } else {
+      obs_data$ID_ordered <- factor(obs_data$ID, levels = sort(unique(obs_data$ID)))
+    }
+    obs_data
+  },
+  
+  aes(x = time, 
+      y = viral_load_plot, 
+      color = paste("Viral Load -", group)),
+  size = 1.5,
+ alpha = 0.8) +
+  
+  facet_wrap(~ID_ordered, ncol = 9,
+              scales = "fixed"           # "free_y": labeling of y-axis of each panel
+             ) +
+  
+  # FIXED: Use limit_of_detection (1e-10) instead of 0
+  geom_hline(yintercept = limit_of_detection,   
+             linetype = "dashed", 
+             color = "gray50", 
+             alpha = 0.5) +
+  
+  scale_color_manual(values = c("Viral Load - High-shedder" = "#3498DB", 
+                                "Viral Load - Low-shedder" = "#E74C3C",
+                                "Effector Cells" = "purple3",
+                                "Target Cells (w/o adapative)" = "darkolivegreen",
+                                "Target Cells (w/ IR)" = "chartreuse4",
+                                #"Refractory Cells" = "#F39C12",
+                                "LoD" = "gray50"
+                                ),
+    breaks = c("Viral Load - High-shedder", "Viral Load - Low-shedder", "Effector Cells", "LoD", "Target Cells (w/o adapative)", "Target Cells (w/ IR)"),
+      name = "Group/Compartment"
+  ) + 
+
+  #### x-axis ####
+  scale_x_continuous(
+    name = "Days post-inoculation (DPI)",
+    breaks = seq(0, 14, by = 2),
+    limits = c(0, 14)
+  ) +
+ 
+  #### y-axis #### 
+  scale_y_continuous(
+    name = expression(paste("Viral Load (log"[10], " TCID"[50], "/mL)")),
+    breaks = seq(0, 12, by = 1),
+    limits = c(0, 8),
+    
+    #Secondary axis on right
+    #sec.axis = sec_axis(
+    #  transform = ~., 
+    #  name = expression(paste("log"[10],("Effector Cell Population)"))),
+    #  breaks = seq(0, 10, by = 2)
+    #  ) 
+  ) +
+  
+  labs(
+    title = "Model Simulations: Viral load trajectories w/o adapative immune responses"     # Change setup # here!
+  ) +
+  
+  theme_bw() +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    legend.position = c(0.96, 0.1),      # bottom right position
+    axis.title = element_text(size = 11, face = "bold"),
+    axis.text = element_text(size = 7),
+    #axis.text.x = element_blank(),
+    #axis.text.y = element_blank(),
+    axis.ticks = element_blank(),            #no tick marks
+    plot.title = element_text(size = 13, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 11, hjust = 0.5, color = "gray30"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(size = 0.25, color = "gray90")  # Keep light grid for reference
+  )
+  
+#ggsave(".../Influenza Project/Figures/Model4_VD_Without_Effector.pdf", faceted_plot_no_effector, width = 16, height = 12, dpi = 400)
+
+faceted_plot_no_effector
+```
+
+## Running with REFRACTORY (innate) immune parameters SET to 0 
+```{r For-loop: Simulate Model with refractory parameters = 0}
+
+# Containers to store outputs 
+all_outputs_no_refractory <- list()
+
+# Effector parameters: k, theta, r, h
+# Extract and plot for each volunteer within for-loop
+for(ID in IDs){
+  
+  i = which(individual_params$id == ID)
+  
+  # Volunteer data
+  volunteer_data <- flu_data[flu_data$ID == ID,]
+
+
+
+#--------------------------------------------------------------- #
+# Virus: parameter estimates obtained from the data frame for the specific ID
+# parameter estimated from MONOLIX (SAEM algorithm) simulation
+#--------------------------------------------------------------- #
+  no_refractory_params <- c(
+  beta   = individual_params[i,"log10beta_mode"],      #infectivity rate
+  delta  = individual_params[i,"delta_mode"],          #death rate of Ip cells
+  pi 	   = individual_params[i,"log10p_mode"],         #production rate of V
+  eta	   = 0,       #reversion from refractory to target cell
+  phi    = 0,       #conversion to refractory state from target cell 
+  c	     = individual_params[i,"c_mode"],              #fixed
+  gamma	 = individual_params[i,"gamma_mode"],          #delay from Ie to Ip
+  r	     = individual_params[i,"r_mode"],             
+  theta  = individual_params[i,"theta_mode"],   
+  k	     = individual_params[i,"k_mode"],
+  h      = individual_params[i,"h_mode"]         
+)
+
+#--------------------------------------------------------------- #
+# Initial conditions for each compartment
+  T_0  = 1*10^7            # Owens et al., 2025
+  Ie_0 = 0
+  Ip_0 = 0
+  R_0  = 0
+  V_0 = 0.075               
+
+# Estimated initial effector cells
+E_0 = individual_params[i,"E0_mode"]
+
+#generate a sequence of time 
+  time_values <- seq(0, 14, by = 0.1)  
+
+#initialize vector of initial conditions
+  init_conditions <- c( T = T_0,
+                       Ie = Ie_0,
+                       Ip = Ip_0,
+                       R = R_0,
+                       V  = V_0,
+                       E  = E_0
+                      )
+#--------------------------------------------------------------- #
+# SIMULATING THE MODEL 
+#--------------------------------------------------------------- #
+output_no_refractory <- ode(y = init_conditions,
+                      times = time_values,
+                      func = teirv_model,        # refractory_immune_only, #teirv_model
+                      parms = no_refractory_params, 
+                      method = "lsoda",         # lsoda for stiff systems (vastly different time scales), bdf, adams
+                      atol  = 1e-6,
+                      rtol  = 1e-6,
+                      hmax  = 0.1
+                      )                         
+  
+# applying lower bound: 1E-10 to all outputs
+output_no_refractory[,-1] <- pmax(output_no_refractory[,-1], 1e-10)       
+output_no_refractory <- as.data.frame(output_no_refractory)
+
+# Add metadata
+output_no_refractory$ID <- ID
+output_no_refractory$group <- ifelse(ID %in% controllers, "Low-shedder", "High-shedder")
+
+# Use this setting if the colors are incorrect
+#output_no_refractory$group <- ifelse(ID %in% controllers, "Low Shedder", "High Shedder")
+
+#--------------------------------------------------------------- #
+# Log-transforming VL and set values below 1e-10 (LOD) to 0
+#--------------------------------------------------------------- #
+  output_no_refractory$viral_load_log10 <- log10(output_no_refractory$V)
+  output_no_refractory$viral_load_plot <- ifelse(output_no_refractory$viral_load_log10 < limit_of_detection,
+                                   0, output_no_refractory$viral_load_log10)
+  
+#--------------------------------------------------------------- #
+# Log-transforming Refractory Compartment and setting lower LOD
+#--------------------------------------------------------------- #
+   output_no_refractory$refrac_log10 <- log10(output_no_refractory$R)
+   output_no_refractory$refrac_plot <-  ifelse(output_no_refractory$refrac_log10 < limit_of_detection,
+                                 0, output_no_refractory$refrac_log10)      # Refractory cells
+   
+  
+#--------------------------------------------------------------- #
+# Log-transforming Effector Compartment and setting lower LOD
+#--------------------------------------------------------------- #
+   output_no_refractory$effector_log10 <- log10(output_no_refractory$E)
+   output_no_refractory$effector_plot <- ifelse(output_no_refractory$effector_log10 < limit_of_detection,
+                                  0, output_no_refractory$effector_log10)    # Effector cells  
+   
+     
+#--------------------------------------------------------------- #
+# Log-transforming Infected Cells (Ip) Compartment and setting lower LOD ### 
+#--------------------------------------------------------------- #
+   output_no_refractory$infected_log10 <- log10(output_no_refractory$Ip)
+   output_no_refractory$infected_plot <- ifelse(output_no_refractory$infected_log10 < limit_of_detection,
+                                  0, output_no_refractory$infected_log10)       # Infected cells
+
+
+#--------------------------------------------------------------- #
+# Log-transforming Target Cells (T) Compartment ### 
+#--------------------------------------------------------------- #
+   output_no_refractory$Tlog10 <- log10(output_no_refractory$T)
+   
+
+   
+#--------------------------------------------------------------- #
+# PLOT SIMULATED RESULTS
+#--------------------------------------------------------------- #
+  
+vl_plot_no_refractory <- ggplot() + 
+    # Model Simulation: Viral load
+    geom_line(data = output_no_refractory, 
+              aes(x = time, y = viral_load_plot, color = "Viral Titer"), 
+              linewidth = 1.2, 
+              alpha = 0.7, 
+              linetype = "solid") +
+     
+   # Model Simulation: Effector Cell pop
+    geom_line(data = output_no_refractory, 
+              aes(x = time, y = effector_plot, color = "Effector Cells"), 
+              linewidth = 1.2, 
+              alpha = 0.5, 
+              linetype = "solid") +
+  
+    # Model Simulation: Effector Cell pop
+    geom_line(data = output_no_refractory, 
+              aes(x = time, y = Tlog10, color = "Target Cells"), 
+              linewidth = 1.2, 
+              alpha = 0.5, 
+              linetype = "solid") +
+  
+#--------------------------------------------------------------- #
+# Observed volunteer data points
+#--------------------------------------------------------------- #
+    geom_point(data = volunteer_data, 
+               aes(x = time, y = viral_titer, color = ifelse(ID %in% controllers, "Low-shedder", "High-shedder")), 
+               size = 2.5, alpha = 0.9) +
+    
+    # Add limit of detection line (here, the LOD is to 1e-10 for plotting)
+    geom_hline( yintercept = 1e-10, 
+                linetype = "dashed",
+                color = "gray30",
+                alpha = 0.7) +
+    
+    # Styling similar to Iyaniwura (2024, SARS-CoV-2 on human challenge) paper
+    scale_color_manual(
+      values = c("Viral Titer" = "red3",
+                 # UNCOMMENT BELOW TO PLOT THE EFFECTOR CELL POPULATION
+                 "Effector Cells" = "purple4",
+                 "Target Cells" = "lightblue",
+                 #"Refractory Cells" = "#F39C12",
+                 "LoD" = "gray50"
+                 ),
+      breaks = c("Viral Titer", "Effector Cells", "Target Cells", "LoD"),  
+      name = "Compartment"
+    ) +
+    
+    
+  ################ x-axis scaling ################ 
+    scale_x_continuous(
+      name = "Days post-inoculation (DPI)",
+      breaks = seq(0, 14, by = 2),
+      limits = c(0, 14)
+    ) +
+    
+  ################ y-axis scaling ################ 
+    scale_y_continuous(
+      name = expression(paste("Viral load (log"[10], " TCID"[50], "/mL)")),
+      breaks = seq(0, 8, by = 1),
+      limits = c(0, 8)
+    ) +
+    
+    labs(title = paste("Volunteer", ID)) +
+    
+  ################ plotting themes ################ 
+    theme_classic() +
+    theme(
+      panel.grid.major.y = element_line(color = "gray90", size = 0.3),
+      legend.position = "right",  # Show legend for compartments
+      legend.title = element_text(size = 10, face = "bold"),
+      legend.text  = element_text(size = 9),
+      axis.title   = element_text(size = 11, face = "bold"),
+      axis.text    = element_text(size = 10),
+      plot.title.  = element_text(size = 12, face = "bold", hjust = 0.5),
+      panel.border = element_rect(color = "black", fill = NA, size = 0.5)
+    )
+  
+# Add virus plot to list
+#plot_list[[as.character(ID)]] <- vl_plot_no_effector
+ all_outputs_no_refractory[[as.character(ID)]] <- output_no_refractory
+
+ print(vl_plot_no_refractory)
+}
+
+# Combine all plots into a single arrangement
+ combined_output_no_refractory <- do.call(rbind, all_outputs_no_refractory)
+
+```
+
+## Facet all simulated plots with REFRACTORY params set to 0 together
+```{r Faceted plots with Refractory parameters = 0}
+
+# Categorize the plots: Natural/numeric order with number first, then letter
+# This handles cases like "4A", "12A", "18A", "30A", "33A"...
+if(all(grepl("^[0-9]+[A-Za-z]+$", unique(combined_output_no_refractory$ID)))) {
+  # Extract number and letter parts (number comes first in ID)
+  id_parts <- data.frame(
+    ID = unique(combined_output_no_refractory$ID),
+    numbers = as.numeric(gsub("[A-Za-z]+$", "", unique(combined_output_no_refractory$ID))),
+    letters = gsub("^[0-9]+", "", unique(combined_output_refractoryr$ID))
+  ) %>%
+    arrange(numbers, letters)  # Sort by number first, then letter
+  
+  # FIXED: Use the ordered id_parts$ID, not sort()
+  combined_output_no_refractory$ID_natural <- factor(combined_output_no_refractory$ID, levels = id_parts$ID)
+  
+} else if(all(grepl("^[A-Za-z]+[0-9]+$", unique(combined_output_no_refractory$ID)))) {
+  # Handle cases like P1, P2, P10 (letter first, then number)
+  id_parts <- data.frame(
+    ID = unique(combined_output_no_refractory$ID),
+    letters = gsub("[0-9]+$", "", unique(combined_output_no_refractory$ID)),
+    numbers = as.numeric(gsub("^[A-Za-z]+", "", unique(combined_output_no_refractory$ID)))
+  ) %>%
+    arrange(letters, numbers)
+  
+  # FIXED: Use the ordered id_parts$ID, not sort()
+  combined_output_no_refractory$ID_natural <- factor(combined_output_no_refractoryr$ID, levels = id_parts$ID)
+  
+} else {
+  # Fallback to alphabetical if pattern doesn't match
+  combined_output_no_refractory$ID_natural <- factor(combined_output_no_refractory$ID, levels = sort(unique(combined_output_no_refractory$ID)))
+}
+
+# Set the ordering
+combined_output_no_refractory$ID_ordered <- combined_output_no_refractory$ID_natural
+
+#--------------------------------------------------------------- #
+# Create faceted plot: individual participant plotted
+faceted_plot_no_refractory <- ggplot() +
+  # Viral load - colored by group
+  geom_line(data = combined_output_no_refractory,
+            aes(x = time, 
+                y = viral_load_plot, 
+                color = paste("Viral Load -", group),
+                group = ID),  # Group by ID for proper faceting
+            linewidth = 0.6, 
+            alpha = 0.6
+          ) +
+  
+#--------------------------------------------------------------- #
+# Model Simulation: Target cells with immune responses effect (from virus dyna model)
+# UNCOMMENT BELOW TO PLOT THE Target CELL population with immune responses effect 
+#--------------------------------------------------------------- #
+     geom_line(data = output,
+           aes(x = time, y = T , color = "Target Cells (w/ IR)"),
+              linewidth = 0.6, alpha = 0.5, linetype = "solid") +
+     
+#--------------------------------------------------------------- #
+# Model Simulation: Target cells
+# UNCOMMENT BELOW TO PLOT THE Target CELL population WITHOUT innate response in effect ###
+#--------------------------------------------------------------- #
+     geom_line(data = combined_output_no_refractory,
+           aes(x = time, y = Tlog10 , color = "Target Cells (w/o innate)"),
+              linewidth = 0.7, alpha = 0.5, linetype = "solid") +
+  
+#--------------------------------------------------------------- #
+# Effector cells - purple color
+# UNCOMMENT BELOW TO PLOT THE EFFECTOR CELL POPULATION ###
+#--------------------------------------------------------------- #
+  geom_line(data = combined_output_no_refractory,
+            aes(x = time, 
+              y = effector_plot, 
+              color = "Effector Cells",
+               group = ID),  # Group by ID for proper faceting
+               linewidth = 0.6, alpha = 0.5) +
+  
+#--------------------------------------------------------------- #
+# Refractory cells - color: F39C12
+# UNCOMMENT BELOW TO PLOT THE REFRACTORY CELL POPULATION ### 
+#--------------------------------------------------------------- #
+  # geom_line(data = output,
+  #         aes(x = time, 
+  #             y = refrac_plot, 
+  #             color = "Refractory Cells",
+  #             group = ID),  # Group by ID for proper faceting
+  #        linewidth = 0.6, alpha = 0.5) +
+
+#--------------------------------------------------------------- #
+# Observed data points
+#--------------------------------------------------------------- #
+  geom_point(data = {
+    obs_data <- do.call(rbind, lapply(IDs, function(id) {
+      vol_data <- flu_data[flu_data$ID == id,]
+      vol_data$group <- ifelse(id %in% controllers, "Low-shedder", "High-shedder")
+      vol_data$viral_load_plot <- ifelse(vol_data$viral_titer < limit_of_detection,
+                                         0, vol_data$viral_titer)
+      return(vol_data)
+    }))
+
+#--------------------------------------------------------------- #
+ # Apply the same ordering as combined_output_no_refractory
+    if(all(grepl("^[0-9]+[A-Za-z]+$", unique(obs_data$ID)))) {
+      # Order by number first, then letter (e.g., "4A", "12A", "18A", ...)
+      id_parts <- data.frame(
+        ID = unique(obs_data$ID),
+        numbers = as.numeric(gsub("[A-Za-z]+$", "", unique(obs_data$ID))),
+        letters = gsub("^[0-9]+", "", unique(obs_data$ID))
+      ) %>%
+        arrange(numbers, letters)
+      
+  # FIXED: Use id_parts$ID for the levels
+      obs_data$ID_ordered <- factor(obs_data$ID, levels = id_parts$ID)
+      
+    } else if(all(grepl("^[A-Za-z]+[0-9]+$", unique(obs_data$ID)))) {
+      
+  # Letter first, then number (e.g., "P1", "P2", "P10")
+      id_parts <- data.frame(
+        ID = unique(obs_data$ID),
+        letters = gsub("[0-9]+$", "", unique(obs_data$ID)),
+        numbers = as.numeric(gsub("^[A-Za-z]+", "", unique(obs_data$ID)))
+      ) %>%
+        arrange(letters, numbers)
+      
+  # FIXED: Use id_parts$ID for the levels
+      obs_data$ID_ordered <- factor(obs_data$ID, levels = id_parts$ID)
+      
+    } else {
+      obs_data$ID_ordered <- factor(obs_data$ID, levels = sort(unique(obs_data$ID)))
+    }
+    obs_data
+  },
+
+#--------------------------------------------------------------- #
+  aes(x = time, 
+      y = viral_load_plot, 
+      color = paste("Viral Load -", group)),
+  size = 1.5,
+ alpha = 0.8) +
+  
+  facet_wrap(~ID_ordered, ncol = 9,
+              scales = "fixed"           # "free_y": labeling of y-axis of each panel
+             ) +
+  geom_hline(yintercept = limit_of_detection,   
+             linetype = "dashed", 
+             color = "gray50", 
+             alpha = 0.5) +
+
+  scale_color_manual(values = c("Viral Load - High-shedder" = "#3498DB", 
+                                "Viral Load - Low-shedder" = "#E74C3C",
+                                "Effector Cells" = "purple3",
+                                #"Refractory Cells" = "#F39C12",
+                                "Target Cells (w/o innate)" = "burlywood4",
+                                "Target Cells (w/ IR)" = "chartreuse4"
+                                ),
+    breaks = c("Viral Load - High-shedder", "Viral Load - Low-shedder", "Effector Cells", "LoD", "Target Cells (w/o innate)", "Target Cells (w/ IR)"),
+      name = "Group/Compartment"
+  ) + 
+  
+  scale_x_continuous(
+    name = "Days post-inoculation (DPI)",
+    breaks = seq(0, 14, by = 2),
+    limits = c(0, 14)
+  ) +
+  
+  scale_y_continuous(
+    name = expression(paste("Viral Load (log"[10], " TCID"[50], "/mL)")),
+    breaks = seq(0, 12, by = 1),
+    limits = c(0, 8),
+    
+    #Secondary axis on right
+    #sec.axis = sec_axis(
+    # transform = ~., 
+    #  name = expression(paste("log"[10],("Effector Cell Population)"))),
+    #  breaks = seq(0, 10, by = 2)
+    #  ) 
+  ) +
+  
+  labs(
+    title = "Model Simulations: Individual viral load trajectories without immune responses"     # Change setup # here!
+  ) +
+  
+  theme_bw() +
+  theme(
+    strip.text = element_text(size = 10, face = "bold"),
+    legend.position = c(0.96, 0.1),      # bottom right position
+    axis.title = element_text(size = 11, face = "bold"),
+    axis.text = element_text(size = 7),
+    #axis.text.x = element_blank(),
+    #axis.text.y = element_blank(),
+    axis.ticks = element_blank(),            #no tick marks
+    plot.title = element_text(size = 13, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 11, hjust = 0.5, color = "gray30"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(size = 0.25, color = "gray90")  # Keep light grid for reference
+  )
+  
+faceted_plot_no_refractory
+
+#ggsave(".../Influenza Project/Figures/Model4_VD_Without_Refractory.pdf", faceted_plot_no_refractory, 
+#     width = 16, height = 12, dpi = 400)
+
+
+```
+
+#-------- Figure 3 of Manuscript -----------#
+# Immune responses knockout simulations
+# Facet all simulated plots (with + without immune responses) from above simulations altogether 
+#-------------------------------------------#
+```{r All counter-simulation plots}
+#--------------------------------------------------------------- #
+# Categorize the plots: Natural/numeric order with number first, then letter
+# This handles cases like "4A", "12A", "18A", "30A", "33A"...
+#--------------------------------------------------------------- #
+if(all(grepl("^[0-9]+[A-Za-z]+$", unique(combined_output$ID)))) {
+  # Extract number and letter parts (number comes first in ID)
+  id_parts <- data.frame(
+    ID = unique(combined_output$ID),
+    numbers = as.numeric(gsub("[A-Za-z]+$", "", unique(combined_output$ID))),
+    letters = gsub("^[0-9]+", "", unique(combined_output$ID))
+  ) %>%
+    arrange(numbers, letters)  # Sort by number first, then letter
+  
+  # FIXED: Use the ordered id_parts$ID, not sort()
+  combined_output$ID_natural <- factor(combined_output$ID, levels = id_parts$ID)
+  
+} else if(all(grepl("^[A-Za-z]+[0-9]+$", unique(combined_output$ID)))) {
+  # Handle cases like P1, P2, P10 (letter first, then number)
+  id_parts <- data.frame(
+    ID = unique(combined_output$ID),
+    letters = gsub("[0-9]+$", "", unique(combined_output$ID)),
+    numbers = as.numeric(gsub("^[A-Za-z]+", "", unique(combined_output$ID)))
+  ) %>%
+    arrange(letters, numbers)
+  
+  # FIXED: Use the ordered id_parts$ID, not sort()
+  combined_output$ID_natural <- factor(combined_output$ID, levels = id_parts$ID)
+  
+} else {
+  # Fallback to alphabetical if pattern doesn't match
+  combined_output$ID_natural <- factor(combined_output$ID, levels = sort(unique(combined_output$ID)))
+}
+
+# Set the ordering
+combined_output$ID_ordered <- combined_output$ID_natural
+
+
+#--------------------------------------------------------------- #
+# Create faceted plot: individual participant plotted
+#--------------------------------------------------------------- #
+all_counterfac_plots <- ggplot() +
+  
+#--------------------------------------------------------------- #
+  # Viral load - colored by group: simulated viral load (from Monolix)
+#--------------------------------------------------------------- #
+  geom_line(data = combined_output,
+            aes(x = time, 
+                y = viral_load_plot, 
+                color = group,
+                group = ID),  # Group by ID for proper faceting -- make sure setting is "Low-shedder" in code Chunk 21
+            linewidth = 1.1, 
+            alpha = 0.6
+          ) +
+  
+#--------------------------------------------------------------- #
+  # Viral load with no effector immune response
+#--------------------------------------------------------------- #
+  geom_line(data = combined_output_no_effector,
+            aes(x = time, 
+                y = viral_load_plot, 
+                color = "No Effector",         # Labeling for legend
+                group = ID),  # Group by ID for proper faceting
+            linewidth = 1.1, 
+            alpha = 0.8
+            #linetype = 5
+          ) +
+  
+#--------------------------------------------------------------- #
+  # Viral load with no refractory immune response
+#--------------------------------------------------------------- #
+  geom_line(data = combined_output_no_refractory,
+            aes(x = time, 
+                y = viral_load_plot, 
+                color = "No Refractory",       # Labeling for legend
+                group = ID),  # Group by ID for proper faceting
+            linewidth = 1.1, 
+            alpha = 0.8
+            #linetype = i
+          ) +
+  
+#--------------------------------------------------------------- #
+  # Effector cells - purple color
+  # UNCOMMENT BELOW TO OVERLAY THE EFFECTOR CELL POPULATION with the vl trajectories ### 
+#--------------------------------------------------------------- #
+  # geom_line(data = combined_output,
+  #           aes(x = time, 
+  #              y = effector_plot, 
+  #              color = "Effector Cell Pop.",
+  #              group = ID),  # Group by ID for proper faceting
+  #              linewidth = 0.7, alpha = 0.5) +
+  
+#--------------------------------------------------------------- #
+  # Refractory cells - color: F39C12
+  # UNCOMMENT BELOW TO OVERLAY THE REFRACTORY CELL POPULATION with the vl trajectories ### 
+#--------------------------------------------------------------- #
+  # geom_line(data = output,
+  #          aes(x = time, 
+  #              y = refrac_plot, 
+  #              color = "Refractory Cells",
+  #              group = ID),  # Group by ID for proper faceting
+  #            linewidth = 0.6, alpha = 0.5) +
+  
+
+#--------------------------------------------------------------- #
+  # Observed data points
+  geom_point(data = {
+    obs_data <- do.call(rbind, lapply(IDs, function(id) {
+      vol_data <- flu_data[flu_data$ID == id,]
+      vol_data$group <- ifelse(id %in% controllers, "Low-shedder", "High-shedder")
+      # Use the setting below if colors are incorrect
+      #vol_data$group_label <- ifelse(id %in% controllers, "Low Shedder", "High Shedder")
+      
+      # viral load is less than 1e-10: set to 0
+      vol_data$viral_load_plot <- ifelse(vol_data$viral_titer < limit_of_detection,
+                                         0, vol_data$viral_titer)
+      return(vol_data)
+    }))
+    
+ # Apply the same ordering as combined_data
+    if(all(grepl("^[0-9]+[A-Za-z]+$", unique(obs_data$ID)))) {
+      # Order by number first, then letter (e.g., "4A", "12A", "18A", ...)
+      id_parts <- data.frame(
+        ID = unique(obs_data$ID),
+        numbers = as.numeric(gsub("[A-Za-z]+$", "", unique(obs_data$ID))),
+        letters = gsub("^[0-9]+", "", unique(obs_data$ID))
+      ) %>%
+        arrange(numbers, letters)
+      
+  # FIXED: Use id_parts$ID for the levels
+      obs_data$ID_ordered <- factor(obs_data$ID, levels = id_parts$ID)
+      
+    } else if(all(grepl("^[A-Za-z]+[0-9]+$", unique(obs_data$ID)))) {
+      
+  # Letter first, then number (e.g., "P1", "P2", "P10")
+      id_parts <- data.frame(
+        ID = unique(obs_data$ID),
+        letters = gsub("[0-9]+$", "", unique(obs_data$ID)),
+        numbers = as.numeric(gsub("^[A-Za-z]+", "", unique(obs_data$ID)))
+      ) %>%
+        arrange(letters, numbers)
+      
+  # FIXED: Use id_parts$ID for the levels
+      obs_data$ID_ordered <- factor(obs_data$ID, levels = id_parts$ID)
+      
+    } else {
+      obs_data$ID_ordered <- factor(obs_data$ID, levels = sort(unique(obs_data$ID)))
+    }
+    obs_data
+  },
+  
+  aes(x = time, 
+      y = viral_load_plot, 
+      color = group),
+  size = 1.5,
+ alpha = 0.8) +
+  
+  facet_wrap(~ID_ordered, ncol = 9, #6,
+              scales = "fixed"           # "free_y": labeling of y-axis of each panel
+             ) +
+  geom_hline(yintercept = limit_of_detection,   
+             linetype = "dashed", 
+             #aes(color = "LOD"), 
+             alpha = 0.5) +
+  
+  scale_color_manual(values = c("High-shedder" = "#3498DB", 
+                                "Low-shedder" = "#E74C3C",
+                                #"High Shedder " = "#3498DB", 
+                                #"Low Shedder" = "#E74C3C",
+                                "No Effector" = "forestgreen",
+                                "No Refractory" = "darkorange",
+                                "Effector Cell Pop." = "purple"
+                                #"LOD" = "gray50"
+                                ),
+    name = "Simulation:"      # Legend Type
+  ) + 
+  
+  scale_x_continuous(
+    name = "Days post-inoculation (DPI)",
+    breaks = seq(0, 14, by = 4),
+    limits = c(0, 14)
+  ) +
+  
+  scale_y_continuous(
+    name = expression(paste("Viral Titer (log"[10], " TCID"[50], "/mL)")),
+    breaks = seq(0, 12, by = 2),
+    limits = c(0, 7),
+    
+  #Secondary axis on right
+  #sec.axis = sec_axis(
+  #    transform = ~., 
+  #    name = expression(paste("Effector Cell Population (log"[10],"cells/mL)")),
+  #    breaks = seq(0, 14, by = 2)
+  #    ) 
+  ) +
+  
+  #labs(
+    #title = "Best Model Fit: Individual Viral Load Trajectories"     
+  #) +
+
+#--------------------------------------------------------------- #  
+ theme_bw(base_size = 22) +
+ theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(size = 0.25, color = "gray90"),  # Keep light grid for reference
+    strip.text = element_text(size = 20, face = "bold"),
+    legend.position = c(0.95, 0.07),        # bottom right position
+    
+    axis.title = element_text(size = 24, face = "bold"),
+    axis.text = element_text(size = 24),
+    
+    #axis tick labels
+    axis.text.x = element_text(size = 16),
+    axis.text.y = element_text(size = 16),
+    
+    #axis.ticks = element_blank(),            #no tick marks
+    plot.title = element_text(size = 28, face = "bold", hjust = 0),
+    plot.subtitle = element_text(size = 16, hjust = 0.5, color = "gray30"),
+    strip.background = element_rect(fill = "gray90", color = "gray50", linewidth = 0.5)
+  )
+ 
+
+print(all_counterfac_plots)
+
+#ggsave(".../Influenza Project/Figures/counterfact_sim_plot.png", all_counterfac_plots, width = 20, height = 14, dpi = 500)
+
+```
+
+
+#--------------------------------------------------------------- #  
+# Boxplots of estimated model parameters
+# Wilcoxon rank-sum test
+#--------------------------------------------------------------- #  
+```{r Normality test}
+# Shapiro-Wilk normality test for each group: tests whether the data significantly deviates from a normal (Guassian) distribution. 
+# Group name: "Low-shedder", "High-shedder"
+shapiro_test_group1 <- shapiro.test(combined_output$E[combined_output$group == "Low-shedder"])
+shapiro_test_group2 <- shapiro.test(combined_output$E[combined_output$group == "High-shedder"])
+
+# Print the results of the normality tests
+shapiro_test_group1      
+shapiro_test_group2
+# Result: less than 0.05: reject the null hypothesis; data is not normally distributed
+
+# Mann-Whitney U/Wilcoxon rank-sum Test (since data is not normally distributed, by the above shapiro-test result)
+wilcoxon_test_result <- wilcox.test(combined_output$E ~ group, data = combined_output)
+
+p_value <- wilcoxon_test_result$p.value
+p_value
+# Result: p-value = 4.546e-10 < 0.05. Thus, there is a significant difference between the two groups: low vs high shedder E-compartment
+# This p-value is different from the box-plot of E0 p-value since that was comparing the individual estimates 
+
+# Using Wilcoxon rank-sum test at each time point by point between the two groups to see if there is any statistical significance
+compare_results <- combined_output %>%
+  group_by(time) %>%
+  summarize(p_value = wilcox.test(E ~ group)$p.value) %>%
+  mutate(sig = case_when(
+    #p_value < 0.001 ~ "***",
+    #p_value < 0.01  ~ "**",
+    p_value < 0.05  ~ "*"
+    #TRUE            ~ "ns"
+  ))
+
+compare_vl_results <- combined_output %>%
+  group_by(time) %>%
+  summarize(p_value = wilcox.test(V ~ group)$p.value) %>%
+  mutate(sig = case_when(
+    #p_value < 0.001 ~ "***",
+    #p_value < 0.01  ~ "**",
+    p_value < 0.05  ~ "*"
+    #TRUE            ~ "ns"
+  ))
+
+```
+
+#--------------------------------------------------------------- #  
+# SUMMARY STATISTICS of Effector cell Populations
+# (1) (Median) Expansion Rate: how fast the effector population is doubling before peak  (1/Day)
+# log transformed: (ln(Epeak)-ln(Estart))/(tpeak - tstart)
+# (2) (Median) Peak Effector population: Highest concentration of effector T cells simulated measured during the infection for low vs. high shedders (Total Cells)
+# (3) (Median) Time to Peak: measure the kinetics or speed of the response - when effector is at maximum (Day)
+# (4) (Median) AUC: Total immune exposure (until the peak, before the plateau?) (cells x Days)
+#--------------------------------------------------------------- #  
+
+# Determine the four summary trajectories: (1)expansion rate, (2)peak effector, (3)peak time, (4)AUC
+```{r Calculate effector Cell Summary individual}
+#####################################################################
+#define function to calculate the four summaries
+#####################################################################
+calc_individual_stats <- combined_output %>%
+  group_by(ID, group) %>%
+  summarise(
+    # determine peak effector cells
+    PeakSize    = max(effector_plot, na.rm = TRUE), 
+    
+    # determine time to peak
+    TimeToPeak  = time[which.max(effector_plot)],
+    
+    # determine AUC using trapezoidal rule
+    AUC         = pracma::trapz(time, effector_plot),
+    
+    # Determine expansion rate
+    ExpRate = {
+      # Find first positive value
+      pos_idx <- which(effector_plot > 0)
+      if(length(pos_idx) >= 2) {
+        first_idx <- pos_idx[1]
+        peak_idx <- which.max(effector_plot)
+        if(peak_idx > first_idx && time[peak_idx] > time[first_idx]) {
+          (effector_plot[peak_idx] - effector_plot[first_idx]) / 
+            (time[peak_idx] - time[first_idx])
+        } else {
+          NA
+        }
+      } else {
+        NA
+      }
+    },
+    .groups = 'drop'
+  )
+
+print(head(calc_individual_stats, 10))
+
+```
+
+#--------------------------------------------------------------- #  
+# Determine box-whisker plots for peak size, time to peak, AUC, and expansion rate of effector cell populations 
+```{r Manually create box-whisker plots}
+ calc_boxplot_stats <- function(data){
+   list(
+     q1 = quantile(data, 0.25, na.rm = TRUE),
+     median = median(data, na.rm = TRUE),
+     q3 = quantile(data, 0.75, na.rm = TRUE),
+     iqr = IQR(data, na.rm = TRUE),
+     n = sum(!is.na(data))
+   )
+ }
+
+ # Calculate stats for each metric
+ peak_stats  <- calc_boxplot_stats(calc_individual_stats$PeakSize)
+ time_stats  <- calc_boxplot_stats(calc_individual_stats$TimeToPeak)
+ auc_stats   <- calc_boxplot_stats(calc_individual_stats$AUC)
+ exp_stats   <- calc_boxplot_stats(calc_individual_stats$ExpRate)
+
+ # Add whisker values
+ peak_stats$whisker_low <- max(min(calc_individual_stats$PeakSize,
+                                   na.rm = TRUE),
+                           peak_stats$q1 - 1.5*peak_stats$iqr)
+ peak_stats$whisker_high <- min(max(calc_individual_stats$PeakSize,
+                                   na.rm = TRUE),
+                           peak_stats$q1 - 1.5*peak_stats$iqr)
+ 
+ print(peak_stats)
+ 
+```
+
+
+#-------- Figure 2 of Manuscript -----------#
+# Box plots
+# Plotting with Individualized y-axes Labels
+#-------------------------------------------#
+```{r Individualized y-axes Box Plots}
+
+library(patchwork)
+
+# --- Labels --- #
+# --- y-axis labels for each parameter ----#
+y_label_1 <- c(expression(paste("Virus production (per day), ", p)),   #pi
+    expression(paste("Transition from eclipse phase (per day), ", gamma)),
+    expression(paste("Transition to refractory state (per day), ", eta)),          #eta
+    expression(paste("Reversion from refractory (per day), ", phi)),            #phi
+    expression(paste("Infected cell death rate (per day), ", delta)),          #delta
+    expression(paste("Effector cell amplification (per cell), ", theta)),     #theta
+    expression(paste("Effector cell threshold (Per cell), ", r)),              #r
+    expression(paste("Initial effector cell population (cells), ", E0))               #E0
+    )
+
+y_label <- c("Virus production (per day)",
+             "Transition from eclipse phase (per day)",
+             "Transition to refractory state (per day)", 
+             "Reversion from refractory state (per day)", 
+             "Infected cell death rate (per day)", 
+             "Effector cell amplification (per cell per day)", 
+             "Effector cell threshold (per cell)",
+             "Initial effector cell population (cells)"
+    )
+
+# --- Y-axis labels (Greek symbols only) --- #
+param_symbols  <- c(
+  expression(p),
+  expression(gamma),
+  expression(eta),
+  expression(phi),
+  expression(delta),
+  expression(theta),
+  expression(r),
+  expression(E[0])
+)
+
+# --- Individual titles (words) --- #
+param_titles <- c(
+  expression(paste("(A) ", p)), 
+  expression(paste("(B) ", gamma)), 
+  expression(paste("(C) ", eta)), 
+  expression(paste("(D) ", phi)), 
+  expression(paste("(E) ", delta)), 
+  expression(paste("(F) ", theta)), 
+  expression(paste("(G) ", r)), 
+  expression(paste("(H) ", E[0]))
+)
+
+
+# --- vector mapping parameter names to corresponding y-axis --- #
+  param_names     <- unique(long_data$Parameter)
+  # "pi"  "gamma"  "eta"   "phi"   "delta" "theta" "r"     "E0"   
+  param_y_labels  <- setNames(y_label, param_names)
+  param_sym_map   <- setNames(param_symbols, param_names)
+  param_title_map <- setNames(param_titles, param_names)
+
+# --- Wilcoxon rank-sum test: p-values for each parameter ---#
+  pvals <- long_data %>%
+    group_by(Parameter) %>%
+    summarize(p_value = wilcox.test(Value ~ Group)$p.value) %>%
+    mutate(label = case_when(
+      p_value < 0.005 ~ paste0("p < 0.005"),             # p-value less than 0.005 display 
+      p_value < 0.01  ~ paste0("p = ", sprintf("%.2f", p_value))
+      # TRUE           ~ paste0("p = ", sprintf("%.2f", p_value)) # two decimal places
+  ))
+
+# --- Labeling p-value --- #
+label_positions <- long_data %>%
+  group_by(Parameter) %>%
+  summarize(y_pos = max(Value, na.rm = TRUE) * 1.1) %>%
+  left_join(pvals, by = "Parameter") %>%            # labeling according to parameter
+  mutate(x = 1.5)                                   # midpoint between the two groups 
+
+# --- Create individual plots for each parameter ---- #
+ plot_list <- lapply(param_names, function(param) {
+  
+  # Subset data
+  data_subset <- long_data %>% filter(Parameter == param)
+  label_subset <- label_positions %>% filter(Parameter == param)
+  label_r <- label_positions %>% filter(Parameter == "r")
+  
+ # Modify only plot "(G) r" to eliminate outliers so whitespace is minimized
+  if (param == "r") {
+
+  data_jitter <- data_subset %>%
+    group_by(Group) %>%
+    filter(
+      between(
+        Value,
+        quantile(Value, 0.25) - 1.5 * IQR(Value),
+        quantile(Value, 0.75) + 1.5 * IQR(Value)
+      )
+    ) %>%
+    ungroup()
+
+    ymax <- max(data_jitter$Value, na.rm = TRUE)
+    ymin <- min(data_jitter$Value, na.rm = TRUE)
+    yrange <- ymax - ymin
+      
+    print(label_subset)
+      
+    rng <- range(data_subset$Value, na.rm = TRUE)
+    pad <- diff(rng) * 0.1
+
+    label_subset <- label_subset %>% 
+    mutate(x = 1.5,
+    y_pos = ymax  + 0.15 * yrange    #--> 104.7495
+    )
+    
+} else {
+
+  data_jitter <- data_subset
+
+}
+  
+    
+  # Create plot
+  p <- ggplot(data_subset, aes(x = Group, y = Value, fill = Group)) + 
+    geom_boxplot(outlier.shape = NA, alpha = 0.7, width = 0.6) +
+ 
+    #--- individual observations in gray ---#
+    geom_jitter(data = data_jitter, 
+                width = 0.15, 
+                alpha = 0.4, 
+                size = 2,
+                color = "gray70") +
+    
+    #--- Median point ---#
+    stat_summary(fun = median, geom = "point",
+                 shape = 23, size = 3, color = "red4", fill = "red4", stroke = 1) +
+    
+    #--- Labeling median value ---#
+    stat_summary(fun = median, geom = "text",
+                 aes(label = sprintf("%.2e", after_stat(y))),
+                 vjust = -1, color = "black", size = 5, fontface = "bold") +
+    
+    #--- Labeling p-value (same font size as median value) ---#
+    geom_text(data = label_subset,
+              aes(x = x, y = y_pos, label = label),
+              inherit.aes = FALSE,
+              size = 8, fontface = "bold", color = "#349") +
+    
+    # color scheme
+    scale_fill_manual(values = c("High Shedder" = "#3498DB", 
+                                 "Low Shedder" = "#E74C3C")) +
+    
+    # Labels
+    labs(title = param_title_map[param], #param,  # Parameter name as panel title
+         x = NULL,
+         y = param_y_labels[param]   #param_sym_map[param] #Custom y-axis label for each!
+         ) +
+    
+    # Themes
+    theme_minimal(base_size = 22) +
+  theme(
+      plot.title = element_text(size = 22, face = "bold", hjust = 0 ),  # hjust = 0 (left aligned), 0.5 (centered), 1 (right)
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor = element_blank(),
+      panel.border = element_rect(color = "gray80", fill = NA, linewidth = 0.5),
+      axis.text.x = element_text(size = 18),
+      axis.text.y = element_text(size = 20),
+      #aspect.ratio = 1,         # Makes each panel square (height = width)
+      #axis.title.y = element_text(size = 15, face = "bold"),
+      legend.position = "none"
+    )
+  
+  # Modify only plot "(E) delta" to eliminate whitespace
+    if (param == "delta") {
+      rng <- range(data_subset$Value, na.rm = TRUE)
+      pad <- diff(rng) * 0.1
+      
+      p <- p + coord_cartesian(
+        ylim = c(rng[1] - pad,
+                 rng[2] + pad)
+        ) 
+    }
+  
+  # Modify only plot "(G) r" to eliminate whitespace
+    if (param == "r") {
+      
+
+      p <- p +coord_cartesian(
+        ylim = c(
+          #rng[1] - pad, 
+          #rng[2] + pad
+          ymin - 0.1 * yrange,
+          ymax + 0.15 * yrange
+          )
+      )
+      
+    }
+  p
+  
+  }
+)
+
+# --- Combine all plots --- #
+combined_boxplot <- wrap_plots(plot_list, ncol = 4) 
+  #+
+  #plot_annotation(
+  #  title = "Estimated Parameter Distributions: Low vs High Shedders",
+  #  theme = theme(plot.title = element_text(size = 20, hjust = 0.5, face = "bold"))
+  #)
+
+print(combined_boxplot)
+#Figures saved in: "/Users/angela.tower/Library/CloudStorage/OneDrive-WashingtonStateUniversity(email.wsu.edu)/Research/Influenza/Figures"
+
+#ggsave("/Users/angela.tower/Library/CloudStorage/OneDrive-WashingtonStateUniversity(email.wsu.edu)/Research/Influenza/Figures/all_params_boxplot.png", 
+#       combined_boxplot, 
+#       width = 16, 
+#       height = 12, 
+#       dpi = 500)
+
+
+#ggsave("/Users/angela.tower/Library/CloudStorage/OneDrive-WashingtonStateUniversity(email.wsu.edu)/Research/Codes/Influenza Project/Figures/all_params_boxplot.png", 
+  plot = combined_boxplot, 
+  width = 20,               #12 
+  height = 14,              #8 
+  dpi = 500, 
+  bg = "transparent")       #background
+
+
+
+```
