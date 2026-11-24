@@ -10,9 +10,9 @@ This repository contains supporting files for the results reported in the manusc
 
 # Data Cleaning
 Provided in the `data` folder consists of the following:
--  Data Folder: Data analyzed in this work was previously digitized by Hooker & Ganusov 2021. The processed data consists of `n=44` volunteers from the original digitized data.
+-  Data Folder: Data analyzed in this work was previously digitized by Hooker & Ganusov 2021. The processed data consists of `n=44` volunteers and the processed data of `n=39` treated volunteers from the original digitized data.
 -  Figures Folder: This folder consists of R scripts and Python notebooks used to create figures in the manuscript and supplementary figures.
--  Monolix Files: This folder consists of the Monolix `.mlxtran`, the estimated individual and population parameter value-files. 
+-  Monolix Files: This folder consists of the Monolix `.mlxtran` files of the estimated individual and population parameter values of the best-fit viral dynamics model and the best-fit of the treatment model. 
 
 
 # 
